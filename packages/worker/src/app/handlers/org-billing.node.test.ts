@@ -1,3 +1,4 @@
+import { BillingPlanUnavailableError } from '#app/account-billing-data.ts'
 import { completeOrgBillingCheckout } from './org-billing.ts'
 import { DatabaseSync } from 'node:sqlite'
 import {
@@ -60,6 +61,7 @@ vi.mock('#app/onboarding-data.ts', () => ({
 		mocks.userHasMcpOAuthGrants(...args),
 }))
 vi.mock('#app/account-billing-data.ts', () => ({
+	BillingPlanUnavailableError: class BillingPlanUnavailableError extends Error {},
 	loadAccountBillingData: (input: Record<string, unknown>) =>
 		mocks.loadAccountBillingData(input),
 }))
@@ -948,4 +950,19 @@ test('a promo reservation is released when Stripe refuses the checkout', async (
 	const retry = await postCheckout(env, 'acme', body)
 	expect(retry.status).toBe(200)
 	expect((await readPromoClaim(people.ada.personId))?.status).toBe('reserved')
+})
+
+test('a missing billing plan becomes unavailable without hiding unrelated read failures', async () => {
+	const env = createEnv()
+	const getBilling = (slug: string) =>
+		call(readWebsiteBilling, env, `/@${slug}/-/billing`)
+	signInAs('ada')
+	mocks.loadAccountBillingData.mockRejectedValueOnce(
+		new BillingPlanUnavailableError('Plan unavailable'),
+	)
+	expect((await getBilling('acme')).data).toBeNull()
+	mocks.loadAccountBillingData.mockRejectedValueOnce(
+		new Error('Database unavailable'),
+	)
+	await expect(getBilling('acme')).rejects.toThrow('Database unavailable')
 })

@@ -159,3 +159,11 @@ test.each(reads)(
 		expect(state.status).not.toHaveBeenCalled()
 	},
 )
+
+test('billing plan disappearing after access resolution becomes native not-found', async () => {
+	state.read.mockResolvedValue(null)
+	await expect(
+		loadBillingPage({ data: { orgSlug: 'team', billing: null, error: null } }),
+	).rejects.toMatchObject({ isNotFound: true })
+	expect(state.status).not.toHaveBeenCalledWith(500)
+})

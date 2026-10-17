@@ -27,6 +27,8 @@ async function websiteContext(options: WebsiteScope): Promise<WebsiteContext> {
 	const env = getStartRequestEnv()
 	setResponseHeader('Cache-Control', 'private, no-store')
 	const authenticated = await readAuthenticatedAppUser(request, env)
+	const resolved = await loadResolvedRequestAuth(request, env)
+	if (resolved.setCookie) setResponseHeader('Set-Cookie', resolved.setCookie)
 	if (!authenticated) throw new WebsiteAuthenticationError()
 	// Request auth is cached. Never mutate it while binding an independent operation.
 	const user = { ...authenticated }

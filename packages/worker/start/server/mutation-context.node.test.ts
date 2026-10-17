@@ -174,3 +174,23 @@ test('request OAuth helpers reach reads, authenticated writes, and deletion leas
 		expect.objectContaining({ env: state.env }),
 	)
 })
+
+test('native reads and writes clear invalidated session cookies before rejecting a tombstoned or orphaned person', async () => {
+	state.authenticated.mockResolvedValue(null)
+	const setCookie = 'kody_session=; Max-Age=0; Path=/; HttpOnly'
+	state.auth.mockResolvedValue({ user: null, setCookie })
+	const operation = vi.fn()
+	await expect(withWebsiteRead({}, operation)).rejects.toBeInstanceOf(
+		WebsiteAuthenticationError,
+	)
+	await expect(withWebsiteMutation({}, operation)).rejects.toBeInstanceOf(
+		WebsiteAuthenticationError,
+	)
+	expect(state.header).toHaveBeenCalledWith('Set-Cookie', setCookie)
+	expect(state.header).toHaveBeenCalledWith(
+		'Cache-Control',
+		'private, no-store',
+	)
+	expect(operation).not.toHaveBeenCalled()
+	expect(state.lease).not.toHaveBeenCalled()
+})

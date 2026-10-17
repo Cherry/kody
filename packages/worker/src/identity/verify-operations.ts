@@ -114,15 +114,16 @@ export async function verifyWebsiteTwoFactor({
 	const userRecord = await db.findOne(usersTable, {
 		where: { stable_user_id: pendingSession.stableUserId },
 	})
+	const liveUserRecord = userRecord?.deleted_at ? null : userRecord
 	const codeValid =
-		userRecord != null &&
+		liveUserRecord != null &&
 		(await verifyTwoFactorCode({
 			db: env.APP_DB,
-			userId: userRecord.id,
+			userId: liveUserRecord.id,
 			code,
 			type: twoFactorVerificationType,
 		}))
-	if (!userRecord || !codeValid) {
+	if (!liveUserRecord || !codeValid) {
 		void logAuditEvent({
 			db: auditDatabaseFromEnv(env),
 			category: 'auth',
@@ -163,7 +164,7 @@ export async function verifyWebsiteTwoFactor({
 	})
 	await reconcileSignupWelcomeCreditsIfPending({
 		db: env.APP_DB,
-		userId: personalOrgIdFromUserRow(userRecord),
+		userId: personalOrgIdFromUserRow(liveUserRecord),
 	})
 	void logAuditEvent({
 		db: auditDatabaseFromEnv(env),

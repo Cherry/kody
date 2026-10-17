@@ -2,6 +2,7 @@ import { personalOrgIdForPerson } from '#worker/orgs/personal-org-id.ts'
 import { operationResult } from '../operation-result.ts'
 import { type OrgPermission } from '@kody-internal/shared/org-permissions.ts'
 import {
+	BillingPlanUnavailableError,
 	loadAccountBillingData,
 	type BillingPageOrg,
 } from '#app/account-billing-data.ts'
@@ -115,7 +116,7 @@ export async function resolveOrgBillingAccess(input: {
 	}
 	const record = await getOrgById(input.env.APP_DB, resolution.org.id)
 	if (!record) {
-		throw new Error(`Cannot load billing: missing org ${resolution.org.id}.`)
+		return { ok: false, status: 404, error: 'Organization unavailable.' }
 	}
 	return {
 		ok: true,
@@ -158,14 +159,19 @@ export async function loadOrgBillingPageData(input: {
 	user: AuthenticatedAppUser
 	org: BillingPageOrg
 }) {
-	return await loadAccountBillingData({
-		env: input.env,
-		userId: input.user.userId,
-		org: input.org,
-		seats: Math.max(1, await countLiveSeats(input.env.APP_DB, input.org.id)),
-		errorCode: input.errorCode,
-		noticeCode: input.noticeCode,
-	})
+	try {
+		return await loadAccountBillingData({
+			env: input.env,
+			userId: input.user.userId,
+			org: input.org,
+			seats: Math.max(1, await countLiveSeats(input.env.APP_DB, input.org.id)),
+			errorCode: input.errorCode,
+			noticeCode: input.noticeCode,
+		})
+	} catch (error) {
+		if (error instanceof BillingPlanUnavailableError) return null
+		throw error
+	}
 }
 
 export async function openWebsiteBillingPortal(input: {

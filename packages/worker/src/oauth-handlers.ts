@@ -122,6 +122,14 @@ function getValidOAuthUsername(value: unknown) {
 		: null
 }
 
+/** Soft-deleted people cannot authorize or reset OAuth (same as session auth). */
+function liveOAuthUserRecord<T extends { deleted_at?: string | null }>(
+	row: T | null | undefined,
+): T | null {
+	if (!row || row.deleted_at) return null
+	return row
+}
+
 function isAuthorizeBindingError(error: unknown): error is { message: string } {
 	return isOrgAuthorizeError(error) || isConnectionProfileAuthorizeError(error)
 }
@@ -651,9 +659,11 @@ async function handleResetClientRequest(
 
 	try {
 		const db = createDb(env.APP_DB)
-		const userRecord = await db.findOne(usersTable, {
-			where: { email: sessionEmail },
-		})
+		const userRecord = liveOAuthUserRecord(
+			await db.findOne(usersTable, {
+				where: { email: sessionEmail },
+			}),
+		)
 		if (!userRecord) {
 			void logAuditEvent({
 				db: auditDatabaseFromEnv(env),
@@ -1237,9 +1247,11 @@ export async function tryHandleSilentOidcAuthorize(
 	}
 
 	const db = createDb(env.APP_DB)
-	const userRecord = await db.findOne(usersTable, {
-		where: { stable_user_id: authorizeSession.stableUserId },
-	})
+	const userRecord = liveOAuthUserRecord(
+		await db.findOne(usersTable, {
+			where: { stable_user_id: authorizeSession.stableUserId },
+		}),
+	)
 	if (!userRecord) {
 		const redirectTo = oidcClientErrorRedirect(
 			authRequest,
@@ -1593,9 +1605,11 @@ export async function decideOAuthAuthorization({
 	let requiresOrgChoiceReload = false
 	if (hasFormCredentials) {
 		const db = createDb(env.APP_DB)
-		const userRecord = await db.findOne(usersTable, {
-			where: { email: normalizedEmail },
-		})
+		const userRecord = liveOAuthUserRecord(
+			await db.findOne(usersTable, {
+				where: { email: normalizedEmail },
+			}),
+		)
 		let passwordValid = false
 		if (userRecord) {
 			passwordValid = await verifyPassword(password, userRecord.password_hash)
@@ -1719,11 +1733,13 @@ export async function decideOAuthAuthorization({
 		}
 	} else if (sessionEmail) {
 		const db = createDb(env.APP_DB)
-		const userRecord = session?.stableUserId
-			? await db.findOne(usersTable, {
-					where: { stable_user_id: session.stableUserId },
-				})
-			: await db.findOne(usersTable, { where: { email: sessionEmail } })
+		const userRecord = liveOAuthUserRecord(
+			session?.stableUserId
+				? await db.findOne(usersTable, {
+						where: { stable_user_id: session.stableUserId },
+					})
+				: await db.findOne(usersTable, { where: { email: sessionEmail } }),
+		)
 		if (!userRecord) {
 			void logAuditEvent({
 				db: auditDatabaseFromEnv(env),

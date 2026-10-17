@@ -393,6 +393,7 @@ export const loadBillingPage = createServerFn({ method: 'GET' })
 			errorCode: data.error,
 			noticeCode: data.billing,
 		})
+		if (!payload) throw notFound()
 		return {
 			payload,
 			head: loadDocumentHead(

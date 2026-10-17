@@ -10,7 +10,13 @@ import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.t
 import { provisionPersonalOrgForSqliteUser } from '#worker/test-support/personal-org-seed.ts'
 import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 import { DatabaseSync } from 'node:sqlite'
-import { expect, test } from 'vitest'
+import { expect, test, vi } from 'vitest'
+import { verifyAuthenticationResponse } from '@simplewebauthn/server'
+import type * as WebauthnServer from '@simplewebauthn/server'
+vi.mock('@simplewebauthn/server', async (importOriginal) => ({
+	...(await importOriginal<typeof WebauthnServer>()),
+	verifyAuthenticationResponse: vi.fn(),
+}))
 
 const testCookieSecret = 'test-cookie-secret-0123456789abcdef0123456789'
 
@@ -259,4 +265,43 @@ test('authentication issues challenge options and rejects unknown passkeys', asy
 	})
 	expect(response.status).toBe(401)
 	expect(await Promise.resolve(response.data)).toMatchObject({ ok: false })
+})
+
+test('a cryptographically verified passkey cannot mint a session for a tombstoned person', async () => {
+	const { env, sqlite, seedUser, seedPasskey } = setup()
+	await seedUser(1, 'deleted-passkey-user')
+	seedPasskey({ id: 'deleted-passkey', userId: 1 })
+	const url = new URL('http://example.com/webauthn/authentication')
+	const options = await webauthnAuthenticationOptions({
+		env,
+		request: new Request(url),
+		url,
+		body: {},
+	})
+	const cookie = options.headers.get('Set-Cookie')!.split(';')[0]!
+	sqlite.exec(`UPDATE users SET deleted_at = CURRENT_TIMESTAMP WHERE id = 1`)
+	vi.mocked(verifyAuthenticationResponse).mockResolvedValueOnce({
+		verified: true,
+		authenticationInfo: { newCounter: 1 },
+	} as never)
+	const result = await webauthnAuthenticationVerify({
+		env,
+		request: new Request(url, { headers: { Cookie: cookie } }),
+		url,
+		body: {
+			response: { id: 'deleted-passkey', rawId: 'deleted-passkey' } as never,
+		},
+	})
+	expect(verifyAuthenticationResponse).toHaveBeenCalledOnce()
+	expect(result.status).toBe(401)
+	expect(result.data).toEqual({ ok: false, error: 'Passkey sign-in failed.' })
+	expect(
+		result.headers
+			.getSetCookie()
+			.some(
+				(cookie) =>
+					cookie.startsWith('kody_session=') && !cookie.includes('Max-Age=0'),
+			),
+	).toBe(false)
+	expect(result.headers.get('Set-Cookie')).toContain('kody_webauthn_challenge=')
 })

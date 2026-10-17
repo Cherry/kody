@@ -349,7 +349,7 @@ export async function webauthnAuthenticationVerify({
 	const userRecord = await db.findOne(usersTable, {
 		where: { id: passkey.user_id },
 	})
-	if (!userRecord) {
+	if (!userRecord || userRecord.deleted_at) {
 		return authOperationResult(
 			{ ok: false, error: 'Passkey sign-in failed.' },
 			{ status: 401, headers: { 'Set-Cookie': clearChallengeCookie } },

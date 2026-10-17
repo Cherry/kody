@@ -408,3 +408,35 @@ function runAuthHandler(
 		params: {},
 	} as never)
 }
+
+test('a deleted person cannot finish a previously issued TOTP challenge or mint a fresh password session', async () => {
+	const { sqlite, enable, login, verify } = await setupTwoFactor()
+	const row = await enable()
+	const pending = await login()
+	const cookie = pending.headers
+		.getSetCookie()
+		.find((cookie) => cookie.startsWith('kody_verify='))!
+		.split(';')[0]!
+	sqlite.exec(`UPDATE users SET deleted_at = CURRENT_TIMESTAMP WHERE id = 1`)
+	const result = await verify(await currentCode(row), cookie)
+	expect(result.status).toBe(400)
+	expect(result.data).toMatchObject({ ok: false, error: 'Invalid code.' })
+	expect(
+		result.headers
+			.getSetCookie()
+			.some(
+				(cookie) =>
+					cookie.startsWith('kody_session=') && !cookie.includes('Max-Age=0'),
+			),
+	).toBe(false)
+	const retry = await login()
+	expect(retry.status).toBe(401)
+	expect(
+		retry.headers
+			.getSetCookie()
+			.some(
+				(cookie) =>
+					cookie.startsWith('kody_session=') && !cookie.includes('Max-Age=0'),
+			),
+	).toBe(false)
+})
