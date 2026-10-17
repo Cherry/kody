@@ -58,7 +58,7 @@ beforeEach(() => {
 	state.derive.mockImplementation((input) => input)
 })
 
-test('denied resource cannot load personal binding or execute a website write', async () => {
+test('denied resource cannot inherit personal binding or execute a website write', async () => {
 	const env = state.env as unknown as Env
 	const resourceRequest = new Request('https://kody.test/@blocked/-/secrets')
 	expect(
@@ -75,7 +75,7 @@ test('denied resource cannot load personal binding or execute a website write', 
 	)
 	const write = vi.fn()
 	await expect(withWebsiteMutation({}, write)).rejects.toThrow('sign in')
-	expect(state.personal).not.toHaveBeenCalled()
+	expect(state.personal).toHaveBeenCalledWith(env.APP_DB, 'person_test')
 	expect(state.derive).not.toHaveBeenCalled()
 	expect(state.flags).not.toHaveBeenCalled()
 	expect(state.lease).not.toHaveBeenCalled()
@@ -90,7 +90,7 @@ test('normal personal and granted organization bindings remain distinct', async 
 	const organization = { org: { id: 'team' }, role: 'member' }
 	state.resolution.mockResolvedValue(organization)
 	expect(await readAuthenticatedAppUser(state.request, env)).not.toBeNull()
-	expect(state.personal).toHaveBeenCalledOnce()
+	expect(state.personal).toHaveBeenCalledTimes(2)
 	expect(state.derive).toHaveBeenLastCalledWith(
 		expect.objectContaining({ orgBinding: organization }),
 	)
@@ -111,7 +111,7 @@ test('deletion retries do not bypass denied organization access', async () => {
 			state.env as unknown as Env,
 		),
 	).toBeNull()
-	expect(state.personal).not.toHaveBeenCalled()
+	expect(state.personal).toHaveBeenCalledWith(state.env.APP_DB, 'person_test')
 	expect(state.derive).not.toHaveBeenCalled()
 })
 
