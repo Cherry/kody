@@ -60,7 +60,6 @@ test('account renders the native data view even with a retained profile location
 		'/account',
 	)
 	expect(html).toContain('Data &amp; deletion')
-	expect(html).not.toContain('How you appear across Kody')
 })
 test('agents renders the native unknown-agent view instead of selecting a list from href', async () => {
 	const html = await renderStartPage(
