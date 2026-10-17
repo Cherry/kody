@@ -9,6 +9,7 @@ export type PackageMutationPayload = {
 	deleted?: boolean
 	packageId?: string
 	listing?: AccountPackageListingBehindHint | null
+	secret_mount_compat?: string | null
 	failed_checks?: NonNullable<RepoSessionCheckStatus['results']>
 }
 export function packageMutationResult(

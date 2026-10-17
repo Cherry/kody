@@ -25,6 +25,7 @@ const loaderData: AccountPackageApprovePublishLoaderData = {
 	packageHref: '/@kodykoala/gmail-drafts',
 	listing: null,
 	listingWillLagAfterPromote: false,
+	secretMountCompatNotice: null,
 	diff: {
 		files: [
 			{
@@ -189,3 +190,22 @@ test('approve-publish for an already-published commit pin does not claim HEAD is
 	expect(html).not.toContain('the public version is up to date')
 	expect(html).not.toContain('No unpublished commit is waiting')
 })
+
+test.each([
+	'This publish keeps secret mount wakeToken. Stale static dependents: @kentcdodds/dependent.',
+	'This publish removes secret mount wakeToken. Stale static dependents: @kentcdodds/dependent. Removing the mount will break those dependents.',
+])(
+	'approve-publish SSR shows the authoritative secret mount warning: %s',
+	async (notice) => {
+		const html = await renderToString(
+			jsx(AccountPackageApprovePublishRoute, {
+				payload: { ...loaderData, secretMountCompatNotice: notice },
+				username: 'kodykoala',
+				kodyId: 'gmail-drafts',
+			}),
+			approvePublishHref,
+		)
+		expect(html).toContain('data-testid="secret-mount-compat-notice"')
+		expect(html).toContain(notice)
+	},
+)

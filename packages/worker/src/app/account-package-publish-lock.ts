@@ -21,6 +21,7 @@ import { resolveArtifactSourceHead } from '#worker/repo/artifacts.ts'
 import { getEntitySourceById } from '#worker/repo/entity-sources.ts'
 import { repoSessionRpc } from '#worker/repo/repo-session-rpc.ts'
 import { resolveListingBehindPublishHint } from '#worker/community/resolve-listing-behind-publish-hint.ts'
+import { loadSecretMountCompatNotice } from '#worker/package-runtime/secret-mount-compat.ts'
 
 type AuthenticatedUser = NonNullable<
 	Awaited<ReturnType<typeof readAuthenticatedAppUser>>
@@ -137,6 +138,19 @@ export async function loadAccountPackageApprovePublishData(input: {
 		}),
 		listing,
 		listingWillLagAfterPromote: false,
+		secretMountCompatNotice:
+			pendingCommit == null
+				? null
+				: await loadSecretMountCompatNotice({
+						env: input.env,
+						userId: ownerUserId,
+						sourceId: source.id,
+						nextCommit: pendingCommit,
+						nextFiles: pendingFiles.files,
+						previousCommit: publishedCommit,
+						previousFiles: publishedFiles.files,
+						sourceRoot: source.source_root,
+					}),
 		diff:
 			unpublishedCompare || pendingMissing
 				? { files: [], omittedCount: 0 }
@@ -301,10 +315,18 @@ async function changePackagePublishState(
 				kodyId: savedPackage.kodyId,
 				promotedCommit: commit,
 			})
+			const secretMountCompat = await loadSecretMountCompatNotice({
+				env: input.env,
+				userId: ownerUserId,
+				sourceId: source.id,
+				nextCommit: commit,
+				previousCommit: source.published_commit,
+			})
 			return packageMutationResult({
 				ok: true,
 				packageId,
 				listing,
+				secret_mount_compat: secretMountCompat,
 			})
 		}
 		case 'checks_failed':

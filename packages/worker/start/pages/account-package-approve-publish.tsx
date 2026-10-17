@@ -250,6 +250,20 @@ export function AccountPackageApprovePublishRoute({
 						</p>
 					</div>
 					{renderListingBehindPrompt({ listing: payload.listing })}
+					{payload.secretMountCompatNotice ? (
+						<p
+							data-testid="secret-mount-compat-notice"
+							css={{
+								margin: 0,
+								color: colors.text,
+								padding: spacing.sm,
+								borderRadius: '0.55rem',
+								border: `1px solid ${colors.warning}`,
+							}}
+						>
+							{payload.secretMountCompatNotice}
+						</p>
+					) : null}
 					{nothingToPublish && headUpToDate ? (
 						<p
 							data-testid="approve-publish-empty-state"
