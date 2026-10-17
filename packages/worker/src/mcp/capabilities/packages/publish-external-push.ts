@@ -25,6 +25,10 @@ import {
 } from '#mcp/capabilities/meta/require-user.ts'
 import { requestLineage } from '#worker/request-context/request-context.ts'
 import {
+	annotateStaticDependentsWithSecretMounts,
+	appendSecretMountCompatNotice,
+} from '#worker/package-runtime/secret-mount-compat.ts'
+import {
 	getStaticPackageDependentsSummary,
 	type StaticPackageDependentsSummary,
 } from '#worker/package-runtime/static-package-dependents.ts'
@@ -668,10 +672,11 @@ async function getListingBehindPublishHint(input: {
 }
 
 async function getPublishStaticDependents(input: {
-	db: D1Database
+	env: Env
 	userId: OwnerId
 	sourceId: string
 	publishedCommit: string | null
+	previousCommit?: string | null
 }): Promise<StaticPackageDependentsSummary> {
 	if (!input.publishedCommit) {
 		return {
@@ -683,11 +688,19 @@ async function getPublishStaticDependents(input: {
 				'No published commit is available, so static dependent bundle metadata cannot be compared.',
 		}
 	}
-	return await getStaticPackageDependentsSummary({
-		db: input.db,
+	const summary = await getStaticPackageDependentsSummary({
+		db: input.env.APP_DB,
 		userId: input.userId,
 		sourceId: input.sourceId,
 		currentDependencyCommit: input.publishedCommit,
+	})
+	return await annotateStaticDependentsWithSecretMounts({
+		env: input.env,
+		userId: input.userId,
+		sourceId: input.sourceId,
+		nextCommit: input.publishedCommit,
+		summary,
+		previousCommit: input.previousCommit,
 	})
 }
 
@@ -880,7 +893,7 @@ async function runExternalPublishAttempt(input: {
 									hasApp: input.hasApp,
 								}),
 								static_dependents: await getPublishStaticDependents({
-									db: input.env.APP_DB,
+									env: input.env,
 									userId: input.ownerUserId,
 									sourceId: input.source.id,
 									publishedCommit,
@@ -936,10 +949,13 @@ async function runExternalPublishAttempt(input: {
 					previous_commit: result.previous_commit,
 					pending_commit: result.pending_commit,
 					approval_url: approvalUrl,
-					message: createPackagePublishLockedMessage({
-						packageName: result.packageName,
-						approvalUrl,
-					}),
+					message: appendSecretMountCompatNotice(
+						createPackagePublishLockedMessage({
+							packageName: result.packageName,
+							approvalUrl,
+						}),
+						result.secret_mount_compat,
+					),
 				}
 			}
 			if (result.status === 'approval_required') {
@@ -957,6 +973,9 @@ async function runExternalPublishAttempt(input: {
 					changes: result.approval.changes,
 					approvalUrl,
 				})
+				const approvalMessage = bundle
+					? `${message} ${pausedPublishBundleMessage(bundle)}`
+					: message
 				return {
 					status: 'approval_required' as const,
 					previous_commit: result.previous_commit,
@@ -964,9 +983,10 @@ async function runExternalPublishAttempt(input: {
 					approval_url: approvalUrl,
 					...(bundle ? { approval_bundle_url: bundle.url } : {}),
 					credential_need_changes: result.approval.changes,
-					message: bundle
-						? `${message} ${pausedPublishBundleMessage(bundle)}`
-						: message,
+					message: appendSecretMountCompatNotice(
+						approvalMessage,
+						result.secret_mount_compat,
+					),
 				}
 			}
 			if (result.status !== 'published') {
@@ -1057,10 +1077,11 @@ async function runExternalPublishAttempt(input: {
 								hasApp: Boolean(testHints?.app),
 							}),
 							static_dependents: await getPublishStaticDependents({
-								db: input.env.APP_DB,
+								env: input.env,
 								userId: input.ownerUserId,
 								sourceId: input.source.id,
 								publishedCommit: result.published_commit,
+								previousCommit: result.previous_commit,
 							}),
 							pending_secret_package_approvals:
 								await getPendingSecretApprovalsForPublishedPackage({
