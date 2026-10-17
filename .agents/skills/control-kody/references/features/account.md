@@ -3,7 +3,8 @@
 Pages about the person, split from the org workspace:
 
 - `/account` (Account settings): name, avatar, email, onboarding banner; links
-  to the public profile at `/@handle`.
+  to the public profile at `/@handle`. Also hosts one-time personal-org
+  conversion through its native Start form, which asks for the new personal handle.
 - `/account/security`: password, links to two-factor and passkeys, sign-in
   providers (Connected accounts), former emails.
 - `/account/organizations`: every org you belong to (no "current" marker: an org

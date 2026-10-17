@@ -44,6 +44,7 @@ import {
 import { AccountAvatarEditor } from './account-avatar-editor.tsx'
 import { avatarMutationOptions } from './account-avatar-query.ts'
 import { useAccountConnections } from './account-connections-panel.tsx'
+import { AccountConvertPersonalOrgPanel } from './account-convert-personal-org-panel.tsx'
 import { AccountDeletePanel } from './account-delete-panel.tsx'
 import { useAccountEmailClaims } from './account-email-claims.ts'
 import { AccountFormerEmailsPanel } from './account-former-emails-panel.tsx'
@@ -445,6 +446,7 @@ export function AccountPage({
 								accountEmailClaims.updateEmailChangePassword,
 						}}
 					/>
+					<AccountConvertPersonalOrgPanel key={actorKey} username={username} />
 				</>
 			) : null}
 			{view === 'security' ? (
