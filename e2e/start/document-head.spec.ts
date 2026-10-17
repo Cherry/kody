@@ -94,7 +94,7 @@ test('homepage SSR includes nonce-authorized SoftwareApplication JSON-LD only on
 		url: 'https://kody.codes',
 		offers: { price: '0', priceCurrency: 'USD' },
 	})
-	expect(data.sameAs).toContain('https://github.com/kentcdodds/kody')
+	expect(data.sameAs).toContain('https://github.com/kody-hq/kody')
 	const nonce = await structured.evaluate(
 		(node: HTMLScriptElement) => node.nonce,
 	)
