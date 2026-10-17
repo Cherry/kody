@@ -24,7 +24,7 @@ export function buildHomeSoftwareApplicationJsonLd(
 			priceCurrency: 'USD',
 			url: `${origin}/pricing`,
 		},
-		sameAs: ['https://github.com/kentcdodds/kody'],
+		sameAs: ['https://github.com/kody-hq/kody'],
 	}
 }
 
