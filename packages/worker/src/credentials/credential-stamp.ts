@@ -306,7 +306,10 @@ function collectCredentialBindings(body: Array<AstNode>): CredentialBindings {
 	return { functions, runtimeObjects }
 }
 
-/** Property name of a member expression, including `obj['literal']`. */
+/**
+ * Property name of a member expression: `obj.lit`, `obj?.lit`, `obj['lit']`,
+ * `obj?.['lit']`, and template literals without expressions (`obj[\`lit\`]`).
+ */
 function memberPropertyName(node: AstNode | undefined): string | null {
 	if (
 		node?.type !== 'MemberExpression' &&
@@ -319,7 +322,7 @@ function memberPropertyName(node: AstNode | undefined): string | null {
 		if (property?.type === 'StringLiteral' || property?.type === 'Literal') {
 			return getNodeName(property)
 		}
-		return null
+		return templateLiteralStaticText(property)
 	}
 	return getNodeName(node.property)
 }
@@ -693,6 +696,9 @@ export function scanLiteralMcpServerKeys(files: Record<string, string>): {
 	files = omitOversizedCredentialStampModules(files)
 	const keys = new Set<string>()
 	const failures: Array<CredentialStampGateFailure> = []
+	const declaredMcpKeys = declaredMcpCredentialKeys(
+		readManifestCredentialSlots(files[packageManifestPath]),
+	)
 	const modulePaths = listScannableModulePaths(files)
 	const parsedModules = new Map(
 		modulePaths.map((path) => [path, parseModule(files[path]!)]),
@@ -811,6 +817,8 @@ export function scanLiteralMcpServerKeys(files: Record<string, string>): {
 					kodyAliases,
 					mcpAliases,
 					constantsWithoutShadows(constants, ancestors),
+					declaredMcpKeys,
+					ancestors,
 				)
 				if (server === null) {
 					failures.push({
@@ -888,6 +896,113 @@ function isKodyMcpRoot(
 	return memberPropertyName(node) === 'mcp'
 }
 
+function declaredMcpCredentialKeys(
+	slots: Record<string, ManifestCredentialSlot>,
+): ReadonlySet<string> {
+	const keys = new Set<string>()
+	for (const [name, slot] of Object.entries(slots)) {
+		if (slot.kind === 'mcp') keys.add(name)
+	}
+	return keys
+}
+
+function isFunctionLikeAstNode(node: AstNode): boolean {
+	return (
+		node.type === 'FunctionDeclaration' ||
+		node.type === 'FunctionExpression' ||
+		node.type === 'ArrowFunctionExpression' ||
+		node.type === 'ObjectMethod' ||
+		node.type === 'ClassMethod'
+	)
+}
+
+/**
+ * Local binding names from one function parameter pattern (identifier,
+ * `{ cm }` / `{ client: cm }`, or those with defaults). Used so loose
+ * `cm.mcp` on a destructured helper param counts like a direct `cm` param.
+ */
+function collectBindingNamesFromPattern(
+	pattern: AstNode | undefined,
+): Array<string> {
+	if (!pattern) return []
+	if (pattern.type === 'Identifier') {
+		const name = getNodeName(pattern)
+		return name ? [name] : []
+	}
+	if (pattern.type === 'AssignmentPattern') {
+		return collectBindingNamesFromPattern(pattern.left)
+	}
+	if (pattern.type === 'ObjectPattern') {
+		const names: Array<string> = []
+		for (const property of pattern.properties ?? []) {
+			if (property.type === 'RestElement' || property.type === 'RestProperty') {
+				names.push(...collectBindingNamesFromPattern(property.argument))
+				continue
+			}
+			if (property.type !== 'ObjectProperty') continue
+			// Shorthand `{ cm }` binds via key; `{ client: cm }` via value.
+			const value = property.value as AstNode | undefined
+			const binding =
+				value?.type === 'AssignmentPattern'
+					? value.left
+					: (value ?? property.key)
+			names.push(...collectBindingNamesFromPattern(binding))
+		}
+		return names
+	}
+	return []
+}
+
+function functionParamNames(node: AstNode): Array<string> {
+	const names: Array<string> = []
+	for (const param of node.params ?? []) {
+		names.push(...collectBindingNamesFromPattern(param))
+	}
+	return names
+}
+
+/**
+ * True when `name` is a parameter of an enclosing function (inner-to-outer).
+ * Used so loose `cm.mcp?.['home']` on a helper parameter counts, while
+ * unrelated `settings.mcp.home` data does not.
+ */
+function isEnclosingFunctionParameter(
+	name: string,
+	ancestors: ReadonlyArray<AstNode>,
+): boolean {
+	for (let index = ancestors.length - 1; index >= 0; index -= 1) {
+		const ancestor = ancestors[index]
+		if (!ancestor || !isFunctionLikeAstNode(ancestor)) continue
+		if (functionParamNames(ancestor).includes(name)) return true
+	}
+	return false
+}
+
+/**
+ * `cm.mcp` / `cm?.mcp` / `cm['mcp']` when `cm` is an enclosing function
+ * parameter (not a known kody/mcp alias). Used only to mark already-declared
+ * MCP slots as used (kasa helpers); never seals new keys or fails the gate.
+ */
+function isLooseDeclaredMcpRoot(
+	node: AstNode,
+	kodyAliases: Set<string>,
+	mcpAliases: Set<string>,
+	ancestors: ReadonlyArray<AstNode>,
+): boolean {
+	if (
+		node.type !== 'MemberExpression' &&
+		node.type !== 'OptionalMemberExpression'
+	) {
+		return false
+	}
+	if (memberPropertyName(node) !== 'mcp') return false
+	if (node.object?.type !== 'Identifier') return false
+	const objectName = getNodeName(node.object)
+	if (objectName == null) return false
+	if (kodyAliases.has(objectName) || mcpAliases.has(objectName)) return false
+	return isEnclosingFunctionParameter(objectName, ancestors)
+}
+
 function collectLiteralMcpServersFromObjectPattern(input: {
 	pattern: AstNode
 	path: string
@@ -937,11 +1052,28 @@ function collectLiteralMcpServersFromObjectPattern(input: {
  * when NAME is a module const string, or null when the access is dynamic, or
  * undefined when the node is not an mcp server access.
  */
+function literalMcpServerName(
+	node: AstNode,
+	constants: ReadonlyMap<string, string>,
+): string | null {
+	if (node.computed === true) {
+		const literal = memberPropertyName(node)
+		if (literal != null) return literal
+		if (node.property) {
+			return resolveStringExpression(node.property, constants)
+		}
+		return null
+	}
+	return memberPropertyName(node)
+}
+
 function mcpServerFromMember(
 	node: AstNode,
 	kodyAliases: Set<string>,
 	mcpAliases: Set<string>,
 	constants: ReadonlyMap<string, string> = new Map(),
+	declaredMcpKeys: ReadonlySet<string> = new Set(),
+	ancestors: ReadonlyArray<AstNode> = [],
 ): string | null | undefined {
 	if (
 		node.type !== 'MemberExpression' &&
@@ -953,22 +1085,25 @@ function mcpServerFromMember(
 		// Bare `kody.mcp` / `mcp` root — wait for a child member when present.
 		return undefined
 	}
-	if (!node.object || !isKodyMcpRoot(node.object, kodyAliases, mcpAliases)) {
+	if (node.object && isKodyMcpRoot(node.object, kodyAliases, mcpAliases)) {
+		const server = literalMcpServerName(node, constants)
+		// `kody.mcp?.[CANVA_MCP_NAME]` when CANVA_MCP_NAME = 'canva' at module
+		// scope — same as credential("KEY") const folding. Dynamic → fail.
+		return server
+	}
+	// Helpers like kasa's `cm.mcp?.['home']` on a function parameter: count a
+	// literal server only when that slot is already declared kind "mcp".
+	// Unrelated locals such as `settings.mcp.home` are ignored even if `home`
+	// is declared.
+	if (
+		node.object &&
+		isLooseDeclaredMcpRoot(node.object, kodyAliases, mcpAliases, ancestors)
+	) {
+		const server = literalMcpServerName(node, constants)
+		if (server != null && declaredMcpKeys.has(server)) return server
 		return undefined
 	}
-	if (node.computed === true) {
-		const property = node.property
-		if (property?.type === 'StringLiteral' || property?.type === 'Literal') {
-			return getNodeName(property)
-		}
-		// `kody.mcp?.[CANVA_MCP_NAME]` when CANVA_MCP_NAME = 'canva' at module
-		// scope — same as credential("KEY") const folding.
-		if (property) {
-			return resolveStringExpression(property, constants)
-		}
-		return null
-	}
-	return getNodeName(node.property)
+	return undefined
 }
 
 /**
