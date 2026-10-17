@@ -2,6 +2,7 @@
 import { getErrorMessage } from '@kody-internal/shared/error-message.ts'
 import { toast } from '#client/toast.ts'
 import {
+	resumeOutboundEmailDelivery,
 	classifyEmailMessage,
 	deleteEmailMessage,
 } from '#start/server/account-mutations'
@@ -51,6 +52,7 @@ import {
 	AccountManagementShell,
 	AccountPageHeader,
 } from './account-management-components.tsx'
+import { emailResumeMutationOptions } from './email-resume-mutation.ts'
 import { emailKeys } from './email-resources.ts'
 import {
 	renderEmailVerificationPrompt,
@@ -203,6 +205,21 @@ export function AccountEmailPage({
 	}
 
 	const captureSubmitter = useSubmitterScope()
+	const resumeMutation = useMutation(
+		emailResumeMutationOptions(queryClient, resumeOutboundEmailDelivery),
+	)
+	async function resumeOutbound() {
+		if (resumeMutation.isPending || !data.outboundDeliveryPausedAt) return
+		const isCurrent = captureSubmitter()
+		setMessage(null)
+		try {
+			await resumeMutation.mutateAsync({ actorKey, orgSlug: org })
+			if (isCurrent()) setMessage('Outbound email resumed.')
+		} catch (error) {
+			if (isCurrent()) toast.error(getErrorMessage(error))
+		}
+	}
+
 	const classifyState = pendingActions.some(
 		(action) =>
 			action.action === 'classify' &&
@@ -354,6 +371,37 @@ export function AccountEmailPage({
 			) : null}
 			{!showUnverified ? (
 				<>
+					{data.outboundDeliveryPausedAt ? (
+						<div
+							css={{
+								display: 'grid',
+								gap: spacing.sm,
+								marginBottom: spacing.md,
+								padding: spacing.md,
+								border: `1px solid ${colors.border}`,
+								borderRadius: '8px',
+								background: colors.primarySoftest,
+							}}
+							data-testid="outbound-email-paused"
+						>
+							<p css={{ margin: 0 }}>
+								Outbound email is paused after repeated delivery failures.
+								Resume once the destination can receive mail from kody.codes
+								again.
+							</p>
+							<button
+								type="button"
+								css={secondaryButtonCss}
+								disabled={resumeMutation.isPending}
+								data-testid="resume-outbound-email"
+								onClick={() => void resumeOutbound()}
+							>
+								{resumeMutation.isPending
+									? 'Resuming…'
+									: 'Resume outbound email'}
+							</button>
+						</div>
+					) : null}
 					{data.usage || data.inboxAddress ? (
 						<div
 							css={{

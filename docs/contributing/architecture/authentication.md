@@ -189,20 +189,27 @@ on support rather than the transactional sender. Provider accept is not
 delivery: the send stores `provider_message_id` in
 `transactional_email_delivery_index` with kind `email_verification` and sets
 `users.email_verification_delivery_status` to `accepted`. Later Cloudflare
-lifecycle events (`delivered`, `bounced`, `failed`, `rejected`, `complained`)
-update that status. A Fastmail-style sender-domain/IP block (`RLR613`, `RLR813`,
-"blacklisted") is classified as `sender_block`. The pending-verification,
+lifecycle events (`delivered`, `deferred`, `bounced`, `failed`, `rejected`,
+`complained`) update that status. A Fastmail-style sender-domain/IP block
+(`RLR613`, `RLR813`, "blacklisted", Spamhaus DBL) — including deferred 4xx that
+carry those signals — is classified as `sender_block`. The pending-verification,
 account, and OAuth authorize UIs surface the bounce instead of staying silently
 pending, and the native `resendWebsiteVerification` server function refuses to
-retry into a known `sender_block`. `/pending-verification` polls the native
-`readWebsiteSessionInfo` server function (session cookie only; no email input)
-for delivery indicators without exposing other users' delivery state. Polls time
-out after ten seconds, and successful resend invalidates earlier reads. The
-first terminal failure fans `user.email_verification.failed` to admin-owned
-packages. When a send stays `accepted` for an hour with no lifecycle event, the
-hourly `email_verification_stall_alert` lane fans
-`user.email_verification.stalled`. `/admin/users` and `adminUserList` accept
-`verification=stalled` for the same derived set. See
+retry into a known `sender_block`. Delivery events also write per-recipient
+cooldowns in `email_recipient_cooldowns` and mark rejecting MX providers in
+`email_rejecting_providers`. Holdable mail, such as campaigns and plan-limit
+nudges, is skipped for rejecting providers until rejections age out or delivery
+succeeds. Essential verification, password, security, and billing mail remains
+subject to recipient cooldowns. Native password-reset operations use the same
+send policy. `/pending-verification` polls the native `readWebsiteSessionInfo`
+server function (session cookie only; no email input) for delivery indicators
+without exposing other users' delivery state. Polls time out after ten seconds,
+and successful resend invalidates earlier reads. The first terminal failure fans
+`user.email_verification.failed` to admin-owned packages. When a send stays
+`accepted` for an hour with no lifecycle event, the hourly
+`email_verification_stall_alert` lane fans `user.email_verification.stalled`.
+`/admin/users` and `adminUserList` accept `verification=stalled` for the same
+derived set. See
 [the admin events guide](../../guides/admin-events.md#useremailverificationfailed-admins)
 and
 [stalled verification](../../guides/admin-events.md#useremailverificationstalled-admins).

@@ -1,5 +1,6 @@
 import { processCloudflareEmailDeliveryEvent } from './delivery-events.ts'
 import { applyOutboundEmailAbusePause } from './outbound-abuse.ts'
+import { applyOutboundConsecutiveFailureTracking } from './outbound-consecutive-failures.ts'
 import { dispatchEmailDeliverySubscriptionEvents } from './package-subscriptions.ts'
 import { type EmailReportingEnv } from './reporting-events.ts'
 import { notifyAdminsOfVerificationDeliveryFailure } from './verification-delivery-notify.ts'
@@ -24,6 +25,11 @@ export async function handleEmailDeliveryQueue(
 			})
 			switch (result.outcome) {
 				case 'invalid':
+					queueMessage.ack()
+					break
+				case 'stale_transactional':
+					// Older than the status already on the user row — ack so
+					// the queue does not retry as unmatched.
 					queueMessage.ack()
 					break
 				case 'recorded_transactional': {
@@ -91,6 +97,16 @@ export async function handleEmailDeliveryQueue(
 						eventRecorded: result.outcome === 'recorded',
 						waitUntil,
 					})
+					// Consecutive-failure counting is not idempotent — only
+					// freshly recorded events may increment, or a queue retry
+					// after a later crash would inflate toward auto-pause.
+					if (result.outcome === 'recorded') {
+						await applyOutboundConsecutiveFailureTracking({
+							db: env.APP_DB,
+							ownerId: result.message.userId,
+							deliveryStatus: result.providerEvent.payload.delivery.status,
+						})
+					}
 					await dispatchEmailDeliverySubscriptionEvents({
 						env,
 						message: result.message,

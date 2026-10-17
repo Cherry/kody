@@ -46,6 +46,7 @@ import {
 	type EntitlementUsageEnv,
 } from '#worker/entitlements/service.ts'
 import { readPagination } from '#worker/query-params.ts'
+import { loadOutboundDeliveryPause } from '#worker/email/outbound-consecutive-failures.ts'
 
 type AuthenticatedUser = NonNullable<
 	Awaited<ReturnType<typeof readAuthenticatedAppUser>>
@@ -177,6 +178,7 @@ export type AccountEmailLoaderData = {
 	/** Platform-assigned `{username}@<platform domain>` when configured. */
 	inboxAddress: string | null
 	verificationMessage: string | null
+	outboundDeliveryPausedAt: string | null
 	inboxes: Array<AccountEmailInbox>
 	messages: Array<AccountEmailMessageListItem>
 	selectedMessage: AccountEmailMessageDetail | null
@@ -539,6 +541,7 @@ function emptyVerifiedShell(input: {
 		verificationMessage: input.emailVerified
 			? null
 			: emailVerificationRequiredMessage,
+		outboundDeliveryPausedAt: null,
 		inboxes: [],
 		messages: [],
 		selectedMessage: null,
@@ -651,31 +654,36 @@ export async function readAccountEmailData(input: {
 
 	const selectedMessageId = input.selectedMessageId?.trim() || null
 	const orgSlug = orgSlugFor(input.user)
-	const [listResult, inboxes, usage, selectedMessage] = await Promise.all([
-		listOwnerEmailMessagesPage({
-			env: input.env,
-			ownerId: userId,
-			query,
-			classification,
-			pageSize,
-			offset,
-		}),
-		loadInboxes({ db: input.env.APP_DB, userId }),
-		loadUsage({
-			db: input.env.APP_DB,
-			env: input.env,
-			userId,
-			email: entitlementEmailForOwner({ user: input.user.mcpUser }, userId),
-		}),
-		selectedMessageId
-			? loadSelectedMessage({
-					env: input.env,
-					stableUserId: userId,
-					orgSlug,
-					messageId: selectedMessageId,
-				})
-			: Promise.resolve(null),
-	])
+	const [listResult, inboxes, usage, selectedMessage, deliveryPause] =
+		await Promise.all([
+			listOwnerEmailMessagesPage({
+				env: input.env,
+				ownerId: userId,
+				query,
+				classification,
+				pageSize,
+				offset,
+			}),
+			loadInboxes({ db: input.env.APP_DB, userId }),
+			loadUsage({
+				db: input.env.APP_DB,
+				env: input.env,
+				userId,
+				email: entitlementEmailForOwner({ user: input.user.mcpUser }, userId),
+			}),
+			selectedMessageId
+				? loadSelectedMessage({
+						env: input.env,
+						stableUserId: userId,
+						orgSlug,
+						messageId: selectedMessageId,
+					})
+				: Promise.resolve(null),
+			loadOutboundDeliveryPause({
+				db: input.env.APP_DB,
+				ownerId: userId,
+			}),
+		])
 	const messages = await Promise.all(
 		listResult.messages.map(async (message) => {
 			const sender = await classifyMessageSender({
@@ -701,6 +709,7 @@ export async function readAccountEmailData(input: {
 			orgSlug,
 		}),
 		verificationMessage: null,
+		outboundDeliveryPausedAt: deliveryPause?.pausedAt ?? null,
 		inboxes,
 		messages,
 		selectedMessage,

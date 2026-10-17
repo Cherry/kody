@@ -1410,3 +1410,29 @@ export const revokeMcpOauthClient = createServerFn({ method: 'POST' })
 			),
 		)
 	})
+
+export const resumeOutboundEmailDelivery = createServerFn({ method: 'POST' })
+	.validator(
+		z.strictObject({
+			orgSlug: z
+				.string()
+				.regex(/^[a-zA-Z0-9_-]+$/)
+				.optional(),
+		}),
+	)
+	.handler(async ({ data }) => {
+		const [
+			{ withWebsiteMutation },
+			{ resumeAccountOutboundDelivery },
+			{ requireOperationResult },
+		] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('../../src/app/handlers/account-email.ts'),
+			import('../../src/app/operation-result.ts'),
+		])
+		return withWebsiteMutation(
+			{ scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined },
+			async (context) =>
+				requireOperationResult(await resumeAccountOutboundDelivery(context)),
+		)
+	})

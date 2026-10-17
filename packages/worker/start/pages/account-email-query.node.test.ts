@@ -69,6 +69,7 @@ const payload = (
 	username: 'owner',
 	inboxAddress: null,
 	verificationMessage: null,
+	outboundDeliveryPausedAt: null,
 	inboxes: [],
 	messages: [message],
 	selectedMessage: message,

@@ -1,3 +1,4 @@
+import { clearOutboundDeliveryPause } from '#worker/email/outbound-consecutive-failures.ts'
 import { type readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { operationResult } from '#app/operation-result.ts'
 import { authorize } from '#worker/authorization/authorize.ts'
@@ -76,4 +77,16 @@ export async function classifyAccountEmailMessage({
 	}
 
 	return operationResult({ ok: true as const, messageId, classification })
+}
+
+export async function resumeAccountOutboundDelivery({
+	env,
+	user,
+}: Omit<EmailMutationContext, 'messageId'>) {
+	await authorize({ env, request: user.request }, 'email:write')
+	await clearOutboundDeliveryPause({
+		db: env.APP_DB,
+		ownerId: ownerIdFromCaller({ request: user.request, user: user.mcpUser }),
+	})
+	return operationResult({ ok: true as const })
 }

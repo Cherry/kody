@@ -84,6 +84,7 @@ test('email server resources return independent message lists and actor destinat
 		username: 'test-user',
 		inboxAddress: 'test-user@inbox.example.com',
 		verificationMessage: null,
+		outboundDeliveryPausedAt: null,
 		inboxes: [],
 		messages: [],
 		selectedMessage: null,

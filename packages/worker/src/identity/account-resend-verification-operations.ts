@@ -91,7 +91,7 @@ export async function resendWebsiteVerification({
 			return authOperationResult(
 				{
 					ok: false,
-					error: emailVerificationSenderBlockMessage,
+					error: error.message || emailVerificationSenderBlockMessage,
 					code: 'sender_block',
 				},
 				409,

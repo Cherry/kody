@@ -8,6 +8,7 @@ import {
 const mocks = vi.hoisted(() => ({
 	processCloudflareEmailDeliveryEvent: vi.fn(),
 	applyOutboundEmailAbusePause: vi.fn(),
+	applyOutboundConsecutiveFailureTracking: vi.fn(),
 	dispatchEmailDeliverySubscriptionEvents: vi.fn(),
 	notifyAdminsOfVerificationDeliveryFailure: vi.fn(),
 }))
@@ -19,6 +20,11 @@ vi.mock('./delivery-events.ts', () => ({
 
 vi.mock('./outbound-abuse.ts', () => ({
 	applyOutboundEmailAbusePause: mocks.applyOutboundEmailAbusePause,
+}))
+
+vi.mock('./outbound-consecutive-failures.ts', () => ({
+	applyOutboundConsecutiveFailureTracking:
+		mocks.applyOutboundConsecutiveFailureTracking,
 }))
 
 vi.mock('./package-subscriptions.ts', () => ({
@@ -64,6 +70,16 @@ test('delivery queue handles terminal outcomes without a D1-to-Mailbox graph mir
 			'unmatched',
 			{ outcome: 'unmatched', providerEvent, message: null },
 			'retry',
+		],
+		[
+			'stale-transactional',
+			{
+				outcome: 'stale_transactional',
+				providerEvent,
+				message: null,
+				event: null,
+			},
+			'ack',
 		],
 		[
 			'transactional',
@@ -113,6 +129,10 @@ test('delivery queue handles terminal outcomes without a D1-to-Mailbox graph mir
 		}
 	})
 	mocks.applyOutboundEmailAbusePause.mockResolvedValue(undefined)
+	mocks.applyOutboundConsecutiveFailureTracking.mockResolvedValue({
+		paused: false,
+		consecutiveFailures: 0,
+	})
 	mocks.dispatchEmailDeliverySubscriptionEvents
 		.mockResolvedValueOnce([])
 		.mockResolvedValueOnce([])
@@ -168,6 +188,9 @@ test('delivery queue handles terminal outcomes without a D1-to-Mailbox graph mir
 		},
 	)
 	expect(mocks.dispatchEmailDeliverySubscriptionEvents).toHaveBeenCalledTimes(3)
+	// recorded + dispatch-failure recorded — not the duplicate replay.
+	expect(mocks.applyOutboundConsecutiveFailureTracking).toHaveBeenCalledTimes(2)
+	expect(mocks.applyOutboundEmailAbusePause).toHaveBeenCalledTimes(4)
 	expect(waitUntilPromises).toHaveLength(0)
 	expect(prepare).not.toHaveBeenCalled()
 	expect(consoleWarn).toHaveBeenCalledWith('email-delivery-event-unmatched', {

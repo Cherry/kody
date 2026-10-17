@@ -82,6 +82,7 @@ it('starts independent reads together and reuses list and destinations when sele
 		username: 'a',
 		inboxAddress: null,
 		verificationMessage: null,
+		outboundDeliveryPausedAt: null,
 		inboxes: [],
 		messages: [],
 		usage: null,

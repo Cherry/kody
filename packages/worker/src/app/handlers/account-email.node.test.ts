@@ -397,6 +397,7 @@ test('email API lists messages with pagination, UserMeter usage, and owner-scope
 		username: 'test-user',
 		inboxAddress: 'test-user@inbox.example.com',
 		verificationMessage: null,
+		outboundDeliveryPausedAt: null,
 		inboxes: [
 			expect.objectContaining({
 				id: 'inbox-1',
