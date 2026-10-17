@@ -87,6 +87,17 @@ test('getEnv memoizes per env identity and requires production rate limiting and
 	).not.toThrow()
 })
 
+test('local wrangler can boot without production Turnstile and rate limiter bindings', () => {
+	expect(() =>
+		getEnv(
+			createEnv({
+				SENTRY_ENVIRONMENT: 'production',
+				WRANGLER_IS_LOCAL_DEV: 'true',
+			}),
+		),
+	).not.toThrow()
+})
+
 test('HTTP boundary dispatches multiple requests from the same env to Start', async () => {
 	const render = vi.fn(async () => Response.json({ ok: true }))
 	const handle = createHttpRequestHandler(render)
