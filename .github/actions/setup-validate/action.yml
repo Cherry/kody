@@ -10,18 +10,54 @@ inputs:
     description: Copy packages/worker/.env.example to .env when true
     required: false
     default: 'false'
+  no_cache:
+    description: >
+      When true, skip setup-node npm cache, Playwright actions/cache
+      restore/save, and Nx remote-cache probe (caller must also clear the
+      remote-cache token and set NX_SKIP_NX_CACHE). Always runs a fresh npm ci.
+    required: false
+    default: 'false'
 
 runs:
   using: composite
   steps:
-    - name: 🟢 Setup Node
+    - name: 🚫 Cache mode (no_cache)
+      if: inputs.no_cache == 'true'
+      shell: bash
+      run: |
+        {
+          echo "### Cache mode: no_cache"
+          echo "- NX_SKIP_NX_CACHE=${NX_SKIP_NX_CACHE:-<unset>}"
+          if [ -n "${NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN:-}" ]; then
+            echo "- NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: set (unexpected for no_cache)"
+          else
+            echo "- NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: unset"
+          fi
+          if [ -n "${NX_SELF_HOSTED_REMOTE_CACHE_SERVER:-}" ]; then
+            echo "- NX_SELF_HOSTED_REMOTE_CACHE_SERVER: ${NX_SELF_HOSTED_REMOTE_CACHE_SERVER}"
+          else
+            echo "- NX_SELF_HOSTED_REMOTE_CACHE_SERVER: unset"
+          fi
+          echo "- setup-node npm cache: omitted"
+          echo "- actions/cache (Playwright): skipped"
+          echo "- npm ci: fresh (--prefer-online)"
+        } | tee -a "$GITHUB_STEP_SUMMARY"
+
+    - name: 🟢 Setup Node (cached)
+      if: inputs.no_cache != 'true'
       uses: actions/setup-node@v6
       with:
         node-version: 26
         cache: npm
 
+    - name: 🟢 Setup Node (no cache)
+      if: inputs.no_cache == 'true'
+      uses: actions/setup-node@v6
+      with:
+        node-version: 26
+
     - name: 🎭 Cache Playwright Browsers
-      if: inputs.playwright == 'true'
+      if: inputs.playwright == 'true' && inputs.no_cache != 'true'
       id: playwright-cache
       uses: actions/cache@v5.0.3
       with:
@@ -31,7 +67,9 @@ runs:
           ${{ runner.os }}-playwright-
 
     - name: 🧊 Enable Nx remote cache
-      if: env.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN != ''
+      if:
+        inputs.no_cache != 'true' &&
+        env.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN != ''
       shell: bash
       # Sets NX_SELF_HOSTED_REMOTE_CACHE_SERVER only when the server is
       # reachable and the token reads (Nx treats a configured-but-unauthorized
@@ -42,7 +80,13 @@ runs:
 
     - name: 📥 Install Dependencies
       shell: bash
-      run: npm ci
+      run: |
+        if [ "${{ inputs.no_cache }}" = "true" ]; then
+          echo "npm-cache=disabled (fresh npm ci --prefer-online)"
+          npm ci --prefer-online
+        else
+          npm ci
+        fi
 
     - name: 📝 Prepare worker env
       if: inputs.worker-env == 'true'
@@ -53,7 +97,11 @@ runs:
       if: inputs.playwright == 'true'
       shell: bash
       run: |
-        echo "playwright-cache-hit=${{ steps.playwright-cache.outputs.cache-hit }}"
+        if [ "${{ inputs.no_cache }}" = "true" ]; then
+          echo "playwright-cache=skipped (no_cache)"
+        else
+          echo "playwright-cache-hit=${{ steps.playwright-cache.outputs.cache-hit }}"
+        fi
         # Cache hit: ensure is a no-op (executable already on disk).
-        # Cache miss: download Chromium only — no apt --with-deps.
+        # Cache miss / no_cache: download Chromium only — no apt --with-deps.
         npm run test:e2e:ensure
