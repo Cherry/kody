@@ -204,6 +204,120 @@ test('scanLiteralMcpServerKeys stamps literal servers and fails dynamic access',
 	expect(literal.keys).toEqual(['home', 'linear'])
 	expect(literal.failures).toEqual([])
 
+	// Optional chaining + brackets + static templates on kody.mcp, and on a
+	// non-kody helper root only when the server is already a declared mcp slot
+	// (kasa: cm.mcp?.['home']).
+	const optionalBracketForms = scanLiteralMcpServerKeys({
+		'package.json': manifest({
+			credentials: {
+				home: { kind: 'mcp', description: 'Home connector.' },
+			},
+		}),
+		'src/home-tools.ts': [
+			'export type KodyKasa = { mcp: { home: unknown } }',
+			'export function getHomeKasaTools(cm: KodyKasa) {',
+			"\treturn cm.mcp?.['home']",
+			'}',
+		].join('\n'),
+		'src/index.ts': [
+			"import { kody } from 'kody:runtime'",
+			'export default async function run() {',
+			'\treturn kody.mcp?.home',
+			'\treturn kody.mcp?.[`linear`]',
+			"\treturn kody?.mcp?.['canva']",
+			'}',
+		].join('\n'),
+	})
+	expect(optionalBracketForms.keys).toEqual(['canva', 'home', 'linear'])
+	expect(optionalBracketForms.failures).toEqual([])
+
+	// adminCredentialStampBackfill sets stampKeyCount = plan.keys.length.
+	// Kasa 1.2.1 only uses cm.mcp?.['home']; before optional/bracket detection
+	// the plan was [] so a matching empty KV stamp reported stamped + 0.
+	const kasaSealPlan = planCredentialStampSeal({
+		'package.json': manifest({
+			credentials: {
+				home: {
+					kind: 'mcp',
+					description: 'Home connector for Kasa plugs.',
+				},
+			},
+		}),
+		'src/home-tools.ts': [
+			'export type KodyKasa = { mcp: { home: unknown } }',
+			'export function getHomeKasaTools(cm: KodyKasa) {',
+			"\treturn cm.mcp?.['home']",
+			'}',
+		].join('\n'),
+		'src/index.ts': [
+			"import { getHomeKasaTools } from './home-tools.ts'",
+			"import { kody } from 'kody:runtime'",
+			'export default () => getHomeKasaTools(kody as never)',
+		].join('\n'),
+	})
+	expect(kasaSealPlan.keys).toEqual(['home'])
+	expect(kasaSealPlan.blockingFailures).toEqual([])
+	expect(kasaSealPlan.sealReady).toBe(true)
+
+	// Destructured helper params bind the same way as a direct `cm` param.
+	const destructuredHelper = scanLiteralMcpServerKeys({
+		'package.json': manifest({
+			credentials: {
+				home: { kind: 'mcp', description: 'Home connector.' },
+			},
+		}),
+		'src/index.ts': [
+			'export type KodyKasa = { mcp: { home: unknown } }',
+			'export function getHome({ cm }: { cm: KodyKasa }) {',
+			"\treturn cm.mcp?.['home']",
+			'}',
+		].join('\n'),
+	})
+	expect(destructuredHelper.keys).toEqual(['home'])
+	expect(destructuredHelper.failures).toEqual([])
+
+	const unrelatedMcpData = scanLiteralMcpServerKeys({
+		'package.json': manifest(),
+		'src/index.ts': [
+			'const settings = { mcp: { enabled: true } }',
+			'export default async function run() {',
+			'\treturn settings.mcp.enabled',
+			'}',
+		].join('\n'),
+	})
+	expect(unrelatedMcpData.keys).toEqual([])
+	expect(unrelatedMcpData.failures).toEqual([])
+
+	// Declared slot name on unrelated local data must not count as use.
+	const unrelatedMatchingSlot = scanLiteralMcpServerKeys({
+		'package.json': manifest({
+			credentials: {
+				home: { kind: 'mcp', description: 'Home connector.' },
+			},
+		}),
+		'src/index.ts': [
+			'const settings = { mcp: { home: { enabled: true } } }',
+			'export default async function run() {',
+			'\treturn settings.mcp.home',
+			'}',
+		].join('\n'),
+	})
+	expect(unrelatedMatchingSlot.keys).toEqual([])
+	expect(unrelatedMatchingSlot.failures).toEqual([])
+
+	const serverNamedMcp = scanLiteralMcpServerKeys({
+		'package.json': manifest(),
+		'src/index.ts': [
+			"import { kody } from 'kody:runtime'",
+			'const servers = kody.mcp',
+			'export default async function run() {',
+			'\treturn servers.mcp.tool({})',
+			'}',
+		].join('\n'),
+	})
+	expect(serverNamedMcp.keys).toEqual(['mcp'])
+	expect(serverNamedMcp.failures).toEqual([])
+
 	const viaAlias = scanLiteralMcpServerKeys({
 		'package.json': manifest(),
 		'src/index.ts': [
