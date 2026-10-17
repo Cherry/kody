@@ -244,7 +244,7 @@ function docDetailHead({
  */
 const routeDocumentHeads = {
 	home: homeDocumentHead,
-	account: titleOnly('Profile'),
+	account: titleOnly('Account settings'),
 	accountSecurity: titleOnly('Security'),
 	accountData: titleOnly('Data & deletion'),
 	accountOrganizations: titleOnly('Organizations'),

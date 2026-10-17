@@ -1198,6 +1198,14 @@ export type AccountOrganizationSummary = {
 	avatarUrl?: string | null
 }
 
+/** Soft-deleted org the viewer can restore (slug only; no raw id in the UI). */
+export type AccountRestorableOrganization = {
+	slug: string
+	displayName: string | null
+	deletedAt: string
+	avatarUrl?: string | null
+}
+
 export type AccountProfileLoaderData = {
 	ok: true
 	email: string
@@ -1214,6 +1222,8 @@ export type AccountProfileLoaderData = {
 type AccountOrganizationsNewLoaderData = {
 	ok: true
 	error: string | null
+	/** Soft-deleted handle this person can restore instead of creating. */
+	restorableSlug: string | null
 	/** What the person typed before a rejected submit, so it is not lost. */
 	draft: { displayName: string; slug: string }
 }
@@ -1241,6 +1251,8 @@ export type AccountOrganizationsLoaderData = {
 	/** The signup organization is named and pictured after the person. */
 	viewer: { displayName: string; avatarUrl: string | null }
 	organizations: Array<AccountOrganizationSummary>
+	/** Soft-deleted orgs this person owned and can restore within 30 days. */
+	restorableOrganizations: Array<AccountRestorableOrganization>
 	pendingInvites: Array<AccountPendingInvite>
 }
 

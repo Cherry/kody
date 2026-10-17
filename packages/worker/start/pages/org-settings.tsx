@@ -298,7 +298,8 @@ function OrgSettingsEditor({ data, queryKey }: OrgSettingsProps) {
 						<AccountManagementPanel title="Delete organization">
 							<p css={accountFieldNoteCss}>
 								This soft-deletes the organization. Members lose access
-								immediately. Restoration is possible for 30 days.
+								immediately. Owners can restore it for 30 days from Account →
+								Organizations.
 							</p>
 							<div css={accountActionsCss}>
 								<button

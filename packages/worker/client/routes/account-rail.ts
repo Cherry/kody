@@ -87,7 +87,7 @@ const accountRailItems: Array<AccountRailItem> = [
 	{
 		id: 'profile',
 		href: routes.account.href(),
-		label: 'Profile',
+		label: 'Account settings',
 		icon: 'user',
 	},
 	{

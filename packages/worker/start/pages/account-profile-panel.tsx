@@ -97,7 +97,7 @@ export function AccountProfilePanel(props: AccountProfilePanelProps) {
 	return (
 		<AccountManagementPanel
 			title="Profile details"
-			description="Your username is permanent. Display name, bio, avatar, and visibility control your public community profile."
+			description="Your username is permanent. Display name, bio, avatar, and visibility control your public profile at your @handle."
 		>
 			<form
 				css={{ display: 'grid', gap: spacing.md, maxWidth: '34rem' }}

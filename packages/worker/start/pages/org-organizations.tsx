@@ -27,7 +27,7 @@ import {
 } from '#universal/styles/tokens.ts'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRouter, useRouteContext } from '@tanstack/react-router'
-import { createOrg } from '#start/server/org-organizations'
+import { createOrg, restoreOrganization } from '#start/server/org-organizations'
 import { invalidateShellQueries } from '../shell-query.ts'
 import { SiteLink } from '../components/site-link.tsx'
 import { type AccountOrganizationsLoaderData } from '#universal/loader-data.ts'
@@ -66,11 +66,12 @@ export function OrganizationsPage({
 }) {
 	const { pageLocation } = useMatchedPageScope()
 	const inviteActions = usePendingInviteActions()
+	const restore = useOrganizationRestore()
 	return (
 		<AccountManagementShell currentHref={pageLocation.href}>
 			<AccountPageHeader
 				title="Organizations"
-				description="Each organization has its own repositories, secrets, and members. Switch between them from the header."
+				description="Each organization has its own repositories, secrets, and members. Open one to work in it, or switch from your avatar menu. Deleted organizations you owned can be restored here for 30 days."
 				currentHref={pageLocation.href}
 				actions={
 					<SiteLink
@@ -88,6 +89,48 @@ export function OrganizationsPage({
 			>
 				{renderOrganizationList(data)}
 			</AccountManagementPanel>
+			{data.restorableOrganizations.length || restore.error ? (
+				<AccountManagementPanel
+					title="Recently deleted"
+					ariaLabel="Recently deleted organizations"
+					description="Organizations you owned that can be restored for 30 days after deletion. Handles stay reserved until the window ends."
+				>
+					{restore.error ? (
+						<AccountManagementMessage tone="error">
+							{restore.error.message}
+						</AccountManagementMessage>
+					) : null}
+					<ul css={orgListCss} data-testid="restorable-organizations">
+						{data.restorableOrganizations.map((org) =>
+							renderOrgRow({
+								key: org.slug,
+								slug: org.slug,
+								displayName: org.displayName,
+								personal: false,
+								viewer: data.viewer,
+								detail: `Deleted ${formatTimestampDate(org.deletedAt)}`,
+								pills: [{ label: 'Deleted', tone: 'quiet' }],
+								testId: 'restorable-organization',
+								trailing: (
+									<button
+										type="button"
+										data-testid="restore-organization"
+										aria-label={`Restore @${org.slug}`}
+										disabled={restore.isPending}
+										css={getPillButtonCss({ size: 'sm' })}
+										onClick={() => restore.submit(org.slug)}
+									>
+										{restore.isPending &&
+										restore.variables?.orgSlug === org.slug
+											? 'Restoring…'
+											: 'Restore'}
+									</button>
+								),
+							}),
+						)}
+					</ul>
+				</AccountManagementPanel>
+			) : null}
 			<AccountManagementPanel
 				id="invites"
 				title="Invites"
@@ -123,6 +166,11 @@ function CreateOrganizationForm() {
 		message: string
 		field: 'displayName' | 'slug'
 	} | null>(null)
+	const restore = useOrganizationRestore()
+	const [restorableSlug, setRestorableSlug] = useState<string | null>(
+		draft.get('restorableSlug'),
+	)
+	const [createError, setCreateError] = useState<string | null>(null)
 	const formErrorId = 'create-organization-form-error'
 	const mutation = useMutation({
 		mutationFn: ({
@@ -141,7 +189,10 @@ function CreateOrganizationForm() {
 		},
 	})
 	const formError =
-		clientError?.message ?? mutation.error?.message ?? draft.get('error')
+		clientError?.message ??
+		createError ??
+		mutation.error?.message ??
+		draft.get('error')
 	const slugInvalid =
 		clientError?.field === 'slug' ||
 		Boolean(
@@ -164,10 +215,28 @@ function CreateOrganizationForm() {
 				<AccountManagementMessage tone="error">
 					<span id={formErrorId}>
 						{clientError?.message ??
+							createError ??
 							mutation.error?.message ??
 							draft.get('error')}
 					</span>
 				</AccountManagementMessage>
+			) : null}
+			{restore.error ? (
+				<AccountManagementMessage tone="error">
+					{restore.error.message}
+				</AccountManagementMessage>
+			) : null}
+			{restorableSlug ? (
+				<div css={accountActionsCss} data-testid="create-org-restore">
+					<button
+						type="button"
+						disabled={restore.isPending || mutation.isPending}
+						css={getPillButtonCss({ size: 'sm' })}
+						onClick={() => restore.submit(restorableSlug)}
+					>
+						{restore.isPending ? 'Restoring…' : `Restore @${restorableSlug}`}
+					</button>
+				</div>
 			) : null}
 			<AccountManagementPanel title="Details">
 				<form
@@ -175,7 +244,7 @@ function CreateOrganizationForm() {
 					noValidate
 					onSubmit={(event) => {
 						event.preventDefault()
-						if (mutation.isPending) return
+						if (mutation.isPending || restore.isPending) return
 						const name = displayName.trim()
 						if (!name || name.length > 80) {
 							setClientError({
@@ -203,8 +272,14 @@ function CreateOrganizationForm() {
 							{ data: { displayName, slug }, actorKey },
 							{
 								onSuccess: (result) => {
-									if (isCurrent())
-										void router.navigate({ href: `/@${result.slug}` })
+									if (!isCurrent()) return
+									if (!result.ok) {
+										setRestorableSlug(result.restorableSlug)
+										setCreateError(result.error)
+										setConfirming(false)
+										return
+									}
+									void router.navigate({ href: `/@${result.slug}` })
 								},
 							},
 						)
@@ -230,6 +305,8 @@ function CreateOrganizationForm() {
 								setDisplayName(name)
 								setClientError(null)
 								if (!slugEdited) {
+									setRestorableSlug(null)
+									setCreateError(null)
 									setSlug(slugFromName(name))
 									setConfirming(false)
 								}
@@ -259,6 +336,8 @@ function CreateOrganizationForm() {
 								value={slug}
 								onChange={(event) => {
 									setClientError(null)
+									setRestorableSlug(null)
+									setCreateError(null)
 									setSlugEdited(event.currentTarget.value.length > 0)
 									setSlug(event.currentTarget.value.toLowerCase())
 									setConfirming(false)
@@ -617,4 +696,42 @@ const emptyTitleCss: CSSObject = {
 	margin: 0,
 	fontWeight: 650,
 	color: colors.text,
+}
+
+function useOrganizationRestore() {
+	const client = useQueryClient(),
+		router = useRouter()
+	const { actorKey } = useMatchedPageScope()
+	const capture = useSubmitterScope()
+	const mutation = useMutation({
+		gcTime: 0,
+		retry: false,
+		mutationFn: ({ orgSlug }: { orgSlug: string; actorKey: string | null }) =>
+			restoreOrganization({ data: { orgSlug } }),
+		onSettled: async (_data, _error, input) => {
+			await Promise.allSettled([
+				invalidateShellQueries(client, input.actorKey),
+				client.invalidateQueries({
+					queryKey: ['page', input.actorKey, 'loadOrganizations'],
+				}),
+			])
+		},
+	})
+	return {
+		...mutation,
+		error: mutation.variables?.actorKey === actorKey ? mutation.error : null,
+		isPending: mutation.variables?.actorKey === actorKey && mutation.isPending,
+		submit: (orgSlug: string) => {
+			if (mutation.isPending) return
+			const isCurrent = capture()
+			mutation.mutate(
+				{ orgSlug, actorKey },
+				{
+					onSuccess: (result) => {
+						if (isCurrent()) void router.navigate({ href: `/@${result.slug}` })
+					},
+				},
+			)
+		},
+	}
 }

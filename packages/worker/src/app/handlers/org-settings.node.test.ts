@@ -46,9 +46,14 @@ vi.mock('#app/page-auth.ts', () => ({
 	requireAuthenticatedPageUser: (...args: Array<unknown>) =>
 		mocks.requireAuthenticatedPageUser(...args),
 }))
-vi.mock('#worker/orgs/soft-delete.ts', () => ({
-	softDeleteOrg: (...args: Array<unknown>) => mocks.softDeleteOrg(...args),
-}))
+vi.mock('#worker/orgs/soft-delete.ts', async (importOriginal) => {
+	const actual =
+		await importOriginal<typeof import('#worker/orgs/soft-delete.ts')>()
+	return {
+		...actual,
+		softDeleteOrg: (...args: Array<unknown>) => mocks.softDeleteOrg(...args),
+	}
+})
 vi.mock('#worker/community/avatar.ts', () => ({
 	processUserAvatar: (...args: Array<unknown>) =>
 		mocks.processUserAvatar(...args),

@@ -362,14 +362,14 @@ export function AccountPage({
 			<AccountPageHeader
 				title={
 					view === 'profile'
-						? 'Profile'
+						? 'Account settings'
 						: view === 'security'
 							? 'Security'
 							: 'Data & deletion'
 				}
 				description={
 					view === 'profile'
-						? 'How you appear across Kody, and the email you sign in with.'
+						? 'Sign-in email and the display name, bio, and visibility for your public profile.'
 						: view === 'security'
 							? 'Your password, second sign-in step, the accounts you can sign in with, and emails you used before.'
 							: 'Take a copy of your account data, or delete the account.'

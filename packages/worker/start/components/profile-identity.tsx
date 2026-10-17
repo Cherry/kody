@@ -70,7 +70,7 @@ export function renderProfileIdentity(
 							Workspace
 						</SiteLink>
 						<SiteLink href={routes.account.href()} css={getGhostButtonCss()}>
-							Edit profile
+							Account settings
 						</SiteLink>
 					</div>
 				) : null}

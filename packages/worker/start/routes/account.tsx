@@ -20,7 +20,7 @@ export const Route = createFileRoute('/account')({
 			pageQuery(context.actorKey, context.pageQueryInput),
 			preload,
 		),
-	head: () => ({ meta: [{ title: 'Profile' }] }),
+	head: () => ({ meta: [{ title: 'Account settings' }] }),
 	component: AccountRoute,
 })
 function AccountRoute() {

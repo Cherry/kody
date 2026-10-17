@@ -48,7 +48,7 @@ function railTabsForPath(
 test('account rail holds the person: profile, security, organizations, experiments, data', () => {
 	const items = accountRailGroups().flatMap((group) => group.items)
 	expect(items.map((item) => item.label)).toEqual([
-		'Profile',
+		'Account settings',
 		'Security',
 		'Organizations',
 		'Experiments',
@@ -58,7 +58,7 @@ test('account rail holds the person: profile, security, organizations, experimen
 	expect(
 		security && isAccountNavItemActive(security, '/account/passkeys'),
 	).toBe(true)
-	const profile = items.find((item) => item.label === 'Profile')
+	const profile = items.find((item) => item.label === 'Account settings')
 	expect(profile && isAccountNavItemActive(profile, '/account/security')).toBe(
 		false,
 	)

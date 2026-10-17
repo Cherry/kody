@@ -50,3 +50,23 @@ export const createOrg = createServerFn({ method: 'POST' })
 			createWebsiteOrganization({ ...context, ...data }),
 		)
 	})
+
+export const restoreOrganization = createServerFn({ method: 'POST' })
+	.validator(
+		z.strictObject({
+			orgSlug: z
+				.string()
+				.trim()
+				.regex(/^[a-zA-Z0-9_-]+$/),
+		}),
+	)
+	.handler(async ({ data }) => {
+		const [{ withWebsiteMutation }, { restoreWebsiteOrganization }] =
+			await Promise.all([
+				import('./mutation-context.ts'),
+				import('../../src/app/handlers/account-organizations.ts'),
+			])
+		return withWebsiteMutation({}, (context) =>
+			restoreWebsiteOrganization({ ...context, ...data }),
+		)
+	})
