@@ -41,7 +41,7 @@ test('org switcher opens under its trigger, lists orgs, and closes like a menu',
 		accountRail.getByRole('link', { name: 'Security', exact: true }),
 	).toHaveAttribute('aria-current', 'page')
 	await expect(
-		accountRail.getByRole('link', { name: 'Profile', exact: true }),
+		accountRail.getByRole('link', { name: 'Account settings', exact: true }),
 	).not.toHaveAttribute('aria-current')
 
 	// Create a second organization through the form; the handle follows the name.

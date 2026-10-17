@@ -35,7 +35,7 @@ for (const { outcome, prewarm } of [
 				original,
 			)
 			await page
-				.getByRole('link', { name: 'Edit profile', exact: true })
+				.getByRole('link', { name: 'Account settings', exact: true })
 				.click()
 			await expect(
 				page.getByLabel('Display name', { exact: true }),
@@ -134,7 +134,7 @@ for (const { outcome, prewarm } of [
 				'original',
 			)
 			await page
-				.getByRole('link', { name: 'Edit profile', exact: true })
+				.getByRole('link', { name: 'Account settings', exact: true })
 				.click()
 			await expect(
 				page.getByLabel('Display name', { exact: true }),
