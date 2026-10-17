@@ -24,6 +24,7 @@ import {
 	emailClassificationValues,
 	type EmailClassification,
 } from '#worker/email/types.ts'
+import { clearOutboundDeliveryPause } from '#worker/email/outbound-consecutive-failures.ts'
 
 function readPathMessageId(params: unknown) {
 	if (
@@ -128,8 +129,39 @@ export function createAccountEmailApiHandler(env: Env) {
 			}
 
 			const action = readTrimmedStringOrEmpty(body, 'action')
-			if (action !== 'classify' && action !== 'delete') {
+			if (
+				action !== 'classify' &&
+				action !== 'delete' &&
+				action !== 'resume_outbound_delivery'
+			) {
 				return jsonResponse({ ok: false, error: 'Invalid action.' }, 400)
+			}
+
+			if (action === 'resume_outbound_delivery') {
+				// Clearing the org-wide consecutive-failure pause is a write
+				// to shared mailbox state — require email:write, not only the
+				// email:read gate at the top of this handler.
+				try {
+					await authorize({ env, request: user.request }, 'email:write')
+				} catch (error) {
+					if (!(error instanceof AuthorizationError)) throw error
+					return jsonResponse({ ok: false, error: error.message }, 403)
+				}
+				const ownerId = ownerIdFromCaller({
+					request: user.request,
+					user: user.mcpUser,
+				})
+				await clearOutboundDeliveryPause({
+					db: env.APP_DB,
+					ownerId,
+				})
+				return jsonResponse(
+					await loadAccountEmailData({
+						env,
+						request,
+						user,
+					}),
+				)
 			}
 
 			const messageId = readTrimmedStringOrEmpty(body, 'message_id')

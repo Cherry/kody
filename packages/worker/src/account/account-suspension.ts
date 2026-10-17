@@ -6,8 +6,12 @@
  * (`resolveBackgroundMcpUser`), and email chokepoints (unlike a community
  * ban, which only blocks community-surface actions). `orgs.email_outbound_paused_at`
  * is the automatic outbound-email pause set by the delivery-event abuse
- * monitor (see `#worker/email/outbound-abuse.ts`); both are cleared by an
- * admin from the admin users page.
+ * monitor (see `#worker/email/outbound-abuse.ts`); cleared by an admin from
+ * the admin users page. `orgs.email_outbound_delivery_paused_at` is set after
+ * consecutive terminal delivery failures on that mailbox owner org and can be
+ * cleared by an owner from Account → Email while that org is selected.
+ * Outbound send gates the mailbox owner (`input.userId`), not only the
+ * actor's personal org.
  */
 
 import { normalizeEmail } from '#worker/identity/normalize-email.ts'
@@ -41,6 +45,7 @@ export function isAccountSuspendedError(
 export type AccountRestrictions = {
 	suspendedAt: string | null
 	emailOutboundPausedAt: string | null
+	emailOutboundDeliveryPausedAt: string | null
 }
 
 /**
@@ -56,7 +61,8 @@ export async function getAccountRestrictionsByStableUserId(input: {
 	if (!stableUserId) return null
 	const row = await input.db
 		.prepare(
-			`SELECT u.suspended_at, o.email_outbound_paused_at
+			`SELECT u.suspended_at, o.email_outbound_paused_at,
+			        o.email_outbound_delivery_paused_at
 			 FROM users u
 			 LEFT JOIN orgs o ON o.id = COALESCE(NULLIF(TRIM(u.personal_org_id), ''), u.stable_user_id)${andLiveDeletedAtSql('o')}
 			 WHERE u.stable_user_id = ?${andLiveDeletedAtSql('u')}`,
@@ -65,11 +71,13 @@ export async function getAccountRestrictionsByStableUserId(input: {
 		.first<{
 			suspended_at: string | null
 			email_outbound_paused_at: string | null
+			email_outbound_delivery_paused_at: string | null
 		}>()
 	if (!row) return null
 	return {
 		suspendedAt: row.suspended_at,
 		emailOutboundPausedAt: row.email_outbound_paused_at,
+		emailOutboundDeliveryPausedAt: row.email_outbound_delivery_paused_at,
 	}
 }
 

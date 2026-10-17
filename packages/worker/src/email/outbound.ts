@@ -38,6 +38,8 @@ import {
 	type MailboxThreadInput,
 } from './mailbox-types.ts'
 import { emailOutboundPausedMessage } from './outbound-abuse.ts'
+import { emailOutboundDeliveryPausedMessage } from './outbound-consecutive-failures.ts'
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 import {
 	emailOutboundProviderCloudflare,
 	upsertOutboundProviderIndexRow,
@@ -525,6 +527,27 @@ export async function sendOutboundEmail(
 		}
 		if (restrictions?.emailOutboundPausedAt) {
 			throw new Error(emailOutboundPausedMessage)
+		}
+		// Delivery-event pauses (abuse + consecutive-failure) are written to
+		// the mailbox owner org (`message.userId`). Gate on that owner —
+		// `input.userId` — so team-mailbox pauses actually stop team sends and
+		// match Account → Email resume for the selected org. Personal abuse
+		// pause above still blocks the actor's own sends.
+		const mailboxPauses = await input.env.APP_DB.prepare(
+			`SELECT email_outbound_paused_at, email_outbound_delivery_paused_at
+			 FROM orgs
+			 WHERE id = ?${andLiveDeletedAtSql()}`,
+		)
+			.bind(input.userId)
+			.first<{
+				email_outbound_paused_at: string | null
+				email_outbound_delivery_paused_at: string | null
+			}>()
+		if (mailboxPauses?.email_outbound_paused_at) {
+			throw new Error(emailOutboundPausedMessage)
+		}
+		if (mailboxPauses?.email_outbound_delivery_paused_at) {
+			throw new Error(emailOutboundDeliveryPausedMessage)
 		}
 		// Sends reference the platform-provisioned sender identity. It is
 		// normally created alongside the default inbox at signup; ensuring it

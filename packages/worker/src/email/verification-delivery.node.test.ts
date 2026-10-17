@@ -121,6 +121,20 @@ test('classifyVerificationDeliveryFailure treats Fastmail RLR613 as a sender blo
 			},
 			expected: null,
 		},
+		{
+			input: {
+				status: 'deferred',
+				smtpResponse: senderBlockResponse,
+			},
+			expected: 'sender_block',
+		},
+		{
+			input: {
+				status: 'deferred',
+				smtpResponse: '450 try again later',
+			},
+			expected: null,
+		},
 	] as const
 	expect(
 		cases.map(({ input }) => classifyVerificationDeliveryFailure(input)),
@@ -215,10 +229,7 @@ test('a newer verification send retires older provider ids and ignores stale eve
 			'2026-08-27T23:20:00.000Z',
 			senderBlockResponse,
 		),
-	).toMatchObject({
-		outcome: 'recorded',
-		event: { status: 'delivered', class: null, alreadyTerminal: true },
-	})
+	).toEqual({ outcome: 'stale' })
 	expect(await readUserDelivery(db)).toEqual({
 		status: 'delivered',
 		class: null,

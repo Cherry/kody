@@ -228,6 +228,46 @@ export function AccountEmailRoute(handle: Handle) {
 		}
 	}
 
+	async function resumeOutboundDelivery() {
+		if (!data?.outboundDeliveryPausedAt || classifyState !== 'idle') return
+		message = null
+		handle.update()
+		try {
+			const response = await fetch(buildEmailApiRequestUrl(getCurrentHref()), {
+				method: 'POST',
+				headers: {
+					Accept: 'application/json',
+					'Content-Type': 'application/json',
+				},
+				credentials: 'include',
+				body: JSON.stringify({
+					action: 'resume_outbound_delivery',
+				}),
+			})
+			if (response.status === 401) {
+				window.location.assign('/login')
+				return
+			}
+			const payload = await readJson<
+				AccountEmailLoaderData & { error?: string; ok?: boolean }
+			>(response)
+			if (!response.ok || !payload?.ok) {
+				throw new Error(payload?.error || 'Unable to resume outbound email.')
+			}
+			applyPayload(payload, getCurrentHref())
+			message = 'Outbound email resumed.'
+			messageTone = 'info'
+			handle.update()
+		} catch (error) {
+			message =
+				error instanceof Error
+					? error.message
+					: 'Unable to resume outbound email.'
+			messageTone = 'error'
+			handle.update()
+		}
+	}
+
 	async function classifySelectedMessage(
 		classification: 'accepted' | 'quarantined',
 	) {
@@ -394,6 +434,36 @@ export function AccountEmailRoute(handle: Handle) {
 										{formatEmailLimit(data.usage.sends_today.limit)} sent today
 									</p>
 								) : null}
+							</div>
+						) : null}
+						{data.outboundDeliveryPausedAt ? (
+							<div
+								mix={css({
+									display: 'grid',
+									gap: spacing.sm,
+									marginBottom: spacing.md,
+									padding: spacing.md,
+									border: `1px solid ${colors.border}`,
+									borderRadius: '8px',
+									background: colors.primarySoftest,
+								})}
+							>
+								<p mix={css({ margin: 0 })}>
+									Outbound email is paused after repeated delivery failures.
+									Resume once the destination can receive mail from kody.codes
+									again.
+								</p>
+								<button
+									type="button"
+									mix={[
+										on('click', () => {
+											void resumeOutboundDelivery()
+										}),
+										css(getGhostButtonCss({ size: 'sm' })),
+									]}
+								>
+									Resume outbound email
+								</button>
 							</div>
 						) : null}
 						{appliedDestinations
