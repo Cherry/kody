@@ -25,6 +25,7 @@ import { getEntitySourceById } from '#worker/repo/entity-sources.ts'
 import { repoSessionRpc } from '#worker/repo/repo-session-rpc.ts'
 import { resolveListingBehindPublishHint } from '#worker/community/resolve-listing-behind-publish-hint.ts'
 import { loadSecretMountCompatNotice } from '#worker/package-runtime/secret-mount-compat.ts'
+import { buildCredentialAllowedPackagesPublishWarningNotice } from '#worker/credentials/credential-allowed-packages-publish-warning.ts'
 
 type AuthenticatedUser = NonNullable<
 	Awaited<ReturnType<typeof readAuthenticatedAppUser>>
@@ -154,6 +155,20 @@ export async function loadAccountPackageApprovePublishData(input: {
 						previousFiles: publishedFiles.files,
 						sourceRoot: source.source_root,
 					}),
+		allowedPackagesPublishNotice:
+			pendingCommit == null
+				? null
+				: await buildCredentialAllowedPackagesPublishWarningNotice({
+						env: input.env,
+						baseUrl: getAppBaseUrl({ env: input.env }),
+						userId: ownerUserId,
+						orgSlug: ownerUsername,
+						packageId: savedPackage.id,
+						packageDisplayName: savedPackage.name,
+						kodyId: savedPackage.kodyId,
+						files: pendingFiles.files,
+						sourceRoot: source.source_root,
+					}).catch(() => null),
 		diff:
 			unpublishedCompare || pendingMissing
 				? { files: [], omittedCount: 0 }

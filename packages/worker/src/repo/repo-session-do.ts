@@ -76,6 +76,8 @@ import {
 import { RepoChecksFailedError } from './repo-checks-failed-error.ts'
 import { credentialPatternNoticeForFiles } from './credential-pattern-check.ts'
 import { loadSecretMountCompatNotice } from '#worker/package-runtime/secret-mount-compat.ts'
+import { loadCredentialAllowedPackagesPublishWarningNotice } from '#worker/credentials/credential-allowed-packages-publish-warning.ts'
+import { getAppBaseUrl } from '#worker/app-base-url.ts'
 import {
 	pausedSessionMovedMessage,
 	requireCredentialNeedsApproval,
@@ -3343,8 +3345,21 @@ class RepoSessionBase extends DurableObject<Env> {
 						sourceRoot: source.source_root,
 					})
 				: null
+		// Warning is independent of the locked-publish gate: lookup/scan failures
+		// must never change lock or approve results (fail-closed lock stays intact).
+		const allowedPackagesPublishNotice =
+			source.entity_kind === 'package'
+				? await loadCredentialAllowedPackagesPublishWarningNotice({
+						env: this.env,
+						baseUrl: getAppBaseUrl({ env: this.env }),
+						userId: input.userId,
+						packageId: source.entity_id,
+						files: snapshotFiles,
+						sourceRoot: source.source_root,
+					})
+				: null
 		const credentialNotice =
-			[patternNotice, secretMountCompat]
+			[patternNotice, secretMountCompat, allowedPackagesPublishNotice]
 				.filter((notice): notice is string => Boolean(notice))
 				.join('\n\n') || null
 		const withCredentialNotice = (message: string) =>
