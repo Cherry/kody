@@ -3,8 +3,13 @@ import { StrictMode, startTransition, useEffect } from 'react'
 import { hydrateRoot } from 'react-dom/client'
 import { hydrateStart } from '@tanstack/react-start/client'
 import { RouterProvider, type AnyRouter } from '@tanstack/react-router'
-import { documentMetaDiagnostics } from './document-meta-diagnostics.ts'
 import { documentHydrationDiagnostics } from './document-hydration-diagnostics.ts'
+import { documentMetaDiagnostics } from './document-meta-diagnostics.ts'
+import {
+	clearStaleRouteChunkReloadFlag,
+	onVitePreloadError,
+	setStaleRouteChunkReloadArmed,
+} from '#client/reload-on-stale-route-chunk.ts'
 import { clearUnknownStartReleaseReloadFlag } from '#client/reload-on-unknown-start-release.ts'
 import {
 	captureClientException,
@@ -13,6 +18,7 @@ import {
 } from '#client/sentry-client.ts'
 
 initSentryClient(document)
+window.addEventListener('vite:preloadError', onVitePreloadError)
 
 function reportReactError(error: unknown, context?: ClientErrorContext) {
 	console.error('React client error:', error)
@@ -25,14 +31,24 @@ function HydratedApp({ router }: { router: AnyRouter }) {
 		if (
 			router.state.matches.length > 0 &&
 			router.state.matches.every((match) => match.status === 'success')
-		)
+		) {
 			clearUnknownStartReleaseReloadFlag()
+			clearStaleRouteChunkReloadFlag()
+		}
 	}, [router])
 	return <RouterProvider router={router} />
 }
 
 hydrateStart()
 	.then((router) => {
+		// Arm only while a route load is in flight. Chunk import rejection and
+		// the route error boundary both run before `onResolved`.
+		router.subscribe('onBeforeLoad', () => {
+			setStaleRouteChunkReloadArmed(true)
+		})
+		router.subscribe('onResolved', () => {
+			setStaleRouteChunkReloadArmed(false)
+		})
 		const reportDocumentError = (
 			error: unknown,
 			context?: ClientErrorContext,
