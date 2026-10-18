@@ -27,6 +27,27 @@ export function transactionalKindRecordsHardBounce(kind: string) {
 	return recipientHardBounceKinds.has(kind)
 }
 
+const deliveryCursorKinds = new Set<string>([
+	transactionalPasswordResetKind,
+	transactionalPasswordResetConfirmedKind,
+	transactionalEmailDestinationVerificationKind,
+])
+
+/**
+ * Index-only kinds claim `transactional_email_delivery_index.last_status*`.
+ * Signup verification uses `users.email_verification_delivery_*` instead.
+ */
+export function transactionalKindUsesDeliveryCursor(kind: string) {
+	return deliveryCursorKinds.has(kind)
+}
+
+/** Canonical UTC ISO so lexical and instant order match. */
+function canonicalIsoTimestamp(value: string): string {
+	const ms = Date.parse(value)
+	if (!Number.isFinite(ms)) return value
+	return new Date(ms).toISOString()
+}
+
 const deliveryDetailMaxLength = 500
 
 const senderBlockPattern =
@@ -241,20 +262,6 @@ function isMissingDeliveryCursor(error: unknown) {
 	)
 }
 
-function isOlderTransactionalEvent(
-	existingAt: string | null | undefined,
-	eventTimestamp: string,
-) {
-	if (!existingAt) return false
-	const existingAtMs = Date.parse(existingAt)
-	const eventAtMs = Date.parse(eventTimestamp)
-	return (
-		Number.isFinite(existingAtMs) &&
-		Number.isFinite(eventAtMs) &&
-		eventAtMs < existingAtMs
-	)
-}
-
 async function loadTransactionalDeliveryCursor(input: {
 	db: D1Database
 	providerMessageId: string
@@ -274,23 +281,105 @@ async function loadTransactionalDeliveryCursor(input: {
 	}
 }
 
-async function rememberTransactionalDeliveryCursor(input: {
+/** True when the durable cursor still names this exact provider event. */
+export async function transactionalDeliveryCursorMatches(input: {
 	db: D1Database
 	providerMessageId: string
 	status: string
 	at: string
-}) {
+}): Promise<boolean> {
+	const cursor = await loadTransactionalDeliveryCursor(input)
+	if (cursor?.lastStatus !== input.status || cursor.lastStatusAt == null) {
+		return false
+	}
+	const storedMs = Date.parse(cursor.lastStatusAt)
+	const eventMs = Date.parse(canonicalIsoTimestamp(input.at))
+	return (
+		Number.isFinite(storedMs) &&
+		Number.isFinite(eventMs) &&
+		storedMs === eventMs
+	)
+}
+
+/** True when the durable cursor currently names a delivered event. */
+export async function transactionalDeliveryCursorIsDelivered(input: {
+	db: D1Database
+	providerMessageId: string
+}): Promise<boolean> {
+	const cursor = await loadTransactionalDeliveryCursor(input)
+	return cursor?.lastStatus === 'delivered'
+}
+
+/**
+ * Claim the per-message delivery cursor only when this event is strictly
+ * newer than the stored cursor (or the cursor is empty). Equal timestamps
+ * lose so a bounce cannot re-arm holds after a delivered event that shares
+ * the same provider clock. Optimistic concurrency on the prior
+ * `last_status_at` is the race guard when queue consumers run concurrently.
+ *
+ * A retry of the same event after the cursor write already committed returns
+ * `recorded` so deliverability side effects can still run.
+ */
+async function claimTransactionalDeliveryCursor(input: {
+	db: D1Database
+	providerMessageId: string
+	status: string
+	at: string
+}): Promise<'recorded' | 'stale' | 'unavailable'> {
+	const at = canonicalIsoTimestamp(input.at)
 	try {
-		await input.db
-			.prepare(
-				`UPDATE transactional_email_delivery_index
-				 SET last_status = ?, last_status_at = ?
-				 WHERE provider_message_id = ?`,
-			)
-			.bind(input.status, input.at, input.providerMessageId)
-			.run()
+		const cursor = await loadTransactionalDeliveryCursor(input)
+		if (cursor?.lastStatusAt != null) {
+			const existingMs = Date.parse(cursor.lastStatusAt)
+			const eventMs = Date.parse(at)
+			if (Number.isFinite(existingMs) && Number.isFinite(eventMs)) {
+				if (eventMs < existingMs) return 'stale'
+				if (eventMs === existingMs) {
+					// Same instant: retry of the same status recovers; a
+					// different status at the same clock loses.
+					return cursor.lastStatus === input.status ? 'recorded' : 'stale'
+				}
+			}
+		}
+
+		const result =
+			cursor?.lastStatusAt == null
+				? await input.db
+						.prepare(
+							`UPDATE transactional_email_delivery_index
+							 SET last_status = ?, last_status_at = ?
+							 WHERE provider_message_id = ?
+							   AND last_status_at IS NULL`,
+						)
+						.bind(input.status, at, input.providerMessageId)
+						.run()
+				: await input.db
+						.prepare(
+							`UPDATE transactional_email_delivery_index
+							 SET last_status = ?, last_status_at = ?
+							 WHERE provider_message_id = ?
+							   AND last_status_at = ?`,
+						)
+						.bind(
+							input.status,
+							at,
+							input.providerMessageId,
+							cursor.lastStatusAt,
+						)
+						.run()
+		if (Number(result.meta.changes ?? 0) > 0) return 'recorded'
+		// Lost the race, or same event already claimed after our read.
+		if (
+			await transactionalDeliveryCursorMatches({
+				...input,
+				at,
+			})
+		) {
+			return 'recorded'
+		}
+		return 'stale'
 	} catch (error) {
-		if (isMissingDeliveryCursor(error)) return
+		if (isMissingDeliveryCursor(error)) return 'unavailable'
 		throw error
 	}
 }
@@ -318,47 +407,21 @@ export async function recordTransactionalEmailDeliveryEvent(input: {
 		return { outcome: 'unmatched' }
 	}
 
-	if (
-		index.kind === transactionalPasswordResetKind ||
-		index.kind === transactionalPasswordResetConfirmedKind
-	) {
-		// Index-only: a reset bounce must not write signup verification
-		// columns. A newer status already stored on this message wins, so a
-		// late bounce after delivered does not re-suppress the recipient.
-		const cursor = await loadTransactionalDeliveryCursor({
-			db: input.db,
-			providerMessageId: input.providerMessageId,
-		})
-		if (isOlderTransactionalEvent(cursor?.lastStatusAt, input.eventTimestamp)) {
-			return { outcome: 'stale' }
-		}
-		await rememberTransactionalDeliveryCursor({
+	if (transactionalKindUsesDeliveryCursor(index.kind)) {
+		// Index-only kinds must not write users.email_verification_delivery_*.
+		// Those columns are signup identity verification. A per-message
+		// delivery cursor still rejects out-of-order provider events so a
+		// late bounce after delivered cannot re-arm recipient cooldowns or
+		// rejecting-provider holds.
+		const claim = await claimTransactionalDeliveryCursor({
 			db: input.db,
 			providerMessageId: input.providerMessageId,
 			status: input.deliveryStatus,
 			at: input.eventTimestamp,
 		})
-		return {
-			outcome: 'recorded',
-			event: {
-				userId: index.user_id,
-				kind: index.kind,
-				recipient: index.recipient,
-				status: input.deliveryStatus,
-				class: classifyVerificationDeliveryFailure({
-					status: input.deliveryStatus,
-					smtpResponse: input.smtpResponse,
-					smtpEnhancedStatusCode: input.smtpEnhancedStatusCode,
-				}),
-				alreadyTerminal: false,
-			},
+		if (claim === 'stale') {
+			return { outcome: 'stale' }
 		}
-	}
-	if (index.kind === transactionalEmailDestinationVerificationKind) {
-		// Index-only: extra-address verify must not write
-		// users.email_verification_delivery_*. Those columns are signup
-		// identity verification. Matching here still acks the queue and
-		// keeps the provider id attributable for ops queries.
 		return {
 			outcome: 'recorded',
 			event: {
