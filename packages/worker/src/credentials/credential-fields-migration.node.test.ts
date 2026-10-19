@@ -1,7 +1,10 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 import { expect, test } from 'vitest'
-import { upsertIntegrationConnection } from '#worker/integrations/repo.ts'
+import {
+	getIntegrationFillPlacement,
+	upsertIntegrationConnection,
+} from '#worker/integrations/repo.ts'
 import { upsertSecretProviderBinding } from '#mcp/secrets/secret-providers/repo.ts'
 import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
 
@@ -103,6 +106,14 @@ test('0111 backfills integration providers from their OAuth app and defaults inj
 test('connecting or reconnecting an integration records its OAuth app provider', async () => {
 	const sqlite = databaseBeforeMigration()
 	runMigration(sqlite)
+	// Live upserts write placement_json (0163); apply it so the writer matches
+	// today's schema without re-running the whole ledger.
+	sqlite.exec(
+		readFileSync(
+			new URL('0163-credential-fill-placement.sql', migrationsDirectory),
+			'utf8',
+		),
+	)
 	const db = createD1FromSqlite(sqlite)
 	const row: Parameters<typeof upsertIntegrationConnection>[0]['row'] = {
 		user_id: 'org-a',
@@ -123,12 +134,26 @@ test('connecting or reconnecting an integration records its OAuth app provider',
 
 	await upsertIntegrationConnection({ db, row })
 	expect(providerOf()).toEqual({ provider: 'github' })
+	expect(
+		await getIntegrationFillPlacement({
+			db,
+			userId: row.user_id,
+			name: row.name,
+		}),
+	).toEqual({ headers: true })
 
 	await upsertIntegrationConnection({
 		db,
 		row: { ...row, app_slug: null, platform_app_slug: 'kody-google' },
 	})
 	expect(providerOf()).toEqual({ provider: 'google' })
+	expect(
+		await getIntegrationFillPlacement({
+			db,
+			userId: row.user_id,
+			name: row.name,
+		}),
+	).toEqual({ headers: true })
 })
 
 test('a vault binding created or rebound after 0111 records its vault as its source', async () => {
