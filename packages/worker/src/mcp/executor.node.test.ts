@@ -56,8 +56,11 @@ type ExecuteArgs = Parameters<
 function createFakeWorkerLoader() {
 	const ids: Array<string> = []
 	const createdOptions = new Map<string, FakeWorkerOptions>()
-	const evaluations: Array<{ dispatchers: Dispatchers; invocation: unknown }> =
-		[]
+	const evaluations: Array<{
+		dispatchers: Dispatchers
+		invocation: unknown
+		runFetcher: unknown
+	}> = []
 	let factoryCallCount = 0
 	const loader = {
 		get(id: string, factory: () => FakeWorkerOptions) {
@@ -71,8 +74,12 @@ function createFakeWorkerLoader() {
 			return {
 				getEntrypoint() {
 					return {
-						async evaluate(dispatchers: Dispatchers, invocation?: unknown) {
-							evaluations.push({ dispatchers, invocation })
+						async evaluate(
+							dispatchers: Dispatchers,
+							invocation?: unknown,
+							runFetcher?: unknown,
+						) {
+							evaluations.push({ dispatchers, invocation, runFetcher })
 							return { result: id, logs: [] }
 						},
 					}
@@ -319,7 +326,7 @@ test('generated kody provider and executor module sources stay bundle-safe and g
 		'if (hostname && hostname !== __kodyExcludedFetchHost && !__kodySecretAuthority)',
 		'const __kodyMcp =',
 		'getOwnPropertyDescriptor',
-		'async evaluate(__dispatchers = {}, __invocation = {})',
+		'async evaluate(__dispatchers = {}, __invocation = {}, __kodyRunFetcher = null)',
 		')(__invocation)',
 		'__invocation.mcpServers',
 		`const ${kodyProviderEvaluateBindingName} = new Proxy`,
@@ -440,17 +447,21 @@ test('createExecuteExecutor aligns worker compatibility and leaves the fetch dea
 			env: createExecutorTestEnv(fakeLoader.loader),
 			timeoutMs,
 		})
-		return fakeLoader.createdOptions.get(fakeLoader.ids[0]!)
+		const options = fakeLoader.createdOptions.get(fakeLoader.ids[0]!)
+		if (!options) throw new Error('Expected worker options')
+		const runFetcher = fakeLoader.evaluations[0]?.runFetcher
+		return { options, runFetcher }
 	}
 
-	expect(await readWorkerOptions()).toMatchObject(
+	expect((await readWorkerOptions()).options).toMatchObject(
 		createDynamicWorkerCompatibilityOptions(),
 	)
 	for (const timeoutMs of [undefined, 300_000, null]) {
-		const workerOptions = await readWorkerOptions(timeoutMs)
-		const gatewayProps = (
-			workerOptions?.globalOutbound as { props?: object } | undefined
-		)?.props
+		const { options, runFetcher } = await readWorkerOptions(timeoutMs)
+		expect(
+			(options['globalOutbound'] as { props?: object } | undefined)?.props,
+		).toEqual({ allowOutboundFetch: false })
+		const gatewayProps = (runFetcher as { props?: object } | undefined)?.props
 		expect(gatewayProps).toMatchObject({ allowOutboundFetch: true })
 		expect(gatewayProps).not.toHaveProperty('outboundFetchTimeoutMs')
 	}

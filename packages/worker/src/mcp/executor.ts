@@ -193,6 +193,8 @@ type DynamicWorkerExecutorInput = {
 	timeout: number
 	signal?: AbortSignal
 	globalOutbound: Fetcher | null
+	/** Mints this run's outbound fetch gateway; passed on each evaluate call. */
+	createRunFetcher?: () => Fetcher
 	/**
 	 * Builds the tail worker that records Cloudflare-measured CPU for this
 	 * isolate (`dynamic_worker_cpu`). Omitted when the loopback export is not
@@ -275,6 +277,7 @@ type DynamicWorkerEntrypoint = {
 	evaluate(
 		dispatchers: Record<string, ToolDispatcher>,
 		invocation?: DynamicWorkerEvaluateInvocation,
+		runFetcher?: Fetcher | null,
 	): Promise<{
 		result: unknown
 		error?: string
@@ -650,9 +653,12 @@ export function createExecuteExecutor(input: {
 		loader: input.env.LOADER,
 		timeout,
 		signal: input.signal,
+		// Shared by every evaluate on this isolate; run fetch uses createRunFetcher.
 		globalOutbound: loopbackExports.KodyFetchGateway({
-			props: gatewayProps,
+			props: { allowOutboundFetch: false } as FetchGatewayProps,
 		}),
+		createRunFetcher: () =>
+			loopbackExports.KodyFetchGateway({ props: gatewayProps }),
 		// Tails only run where Analytics Engine is bound (deployed Workers).
 		// Open-source workerd reports zero CPU, and a local tail would outlive
 		// the run with a D1 write per invocation.
@@ -804,7 +810,11 @@ function createStableDynamicWorkerExecutor(input: DynamicWorkerExecutorInput) {
 									grantedSecretAuthorityPackageIds,
 								)
 								const evaluate = () =>
-									entrypoint.evaluate(dispatchers, evaluateInvocation)
+									entrypoint.evaluate(
+										dispatchers,
+										evaluateInvocation,
+										input.createRunFetcher?.() ?? null,
+									)
 								return grantedSecretAuthorityPackageIds
 									? await runWithSecretAuthorityScope(
 											grantedSecretAuthorityPackageIds,
@@ -1027,7 +1037,8 @@ function createSandboxRunFetchSource(allowOutboundFetch: boolean) {
 		'        if (__kodySecretAuthority) {',
 		`          __kodyFetchHeaders.set(${JSON.stringify(secretAuthorityHeaderName)}, __kodySecretAuthority);`,
 		'        }',
-		'        return __kodyNativeFetch(input, {',
+		'        if (!__kodyRunFetcher) throw new Error("Outbound fetch is unavailable for this run.");',
+		'        return __kodyRunFetcher.fetch(input, {',
 		'          ...init,',
 		'          headers: __kodyFetchHeaders,',
 		'        });',
@@ -1104,7 +1115,7 @@ function createExecutorModule(input: {
 		'}',
 		'',
 		'export default class CodeExecutor extends WorkerEntrypoint {',
-		'  async evaluate(__dispatchers = {}, __invocation = {}) {',
+		'  async evaluate(__dispatchers = {}, __invocation = {}, __kodyRunFetcher = null) {',
 		'    const __logs = [];',
 		'    const __kodyRawFetchHosts = [];',
 		`    const __kodyExcludedFetchHost = ${excludedHostname};`,

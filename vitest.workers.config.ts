@@ -1,5 +1,8 @@
 import { resolve } from 'node:path'
-import { cloudflareTest } from '@cloudflare/vitest-pool-workers'
+import {
+	cloudflareTest,
+	readD1Migrations,
+} from '@cloudflare/vitest-pool-workers'
 import { defineProject, mergeConfig } from 'vitest/config'
 import { rootDir, sharedProjectConfig } from './vitest-shared.ts'
 
@@ -38,6 +41,16 @@ export default mergeConfig(
 					environment: 'test',
 				},
 				miniflare: {
+					// Schema for tests that seed real rows (users, orgs, credentials):
+					// `applyD1Migrations(env.APP_DB, env.TEST_MIGRATIONS)`.
+					bindings: {
+						TEST_MIGRATIONS: await readD1Migrations(
+							resolve(rootDir, 'packages/worker/migrations'),
+						),
+						TEST_AUDIT_MIGRATIONS: await readD1Migrations(
+							resolve(rootDir, 'packages/worker/audit-migrations'),
+						),
+					},
 					// The test env's JOBS and HIGHLIGHT service bindings target
 					// sibling workers that local `wrangler dev` runs alongside
 					// the main worker. The pool only loads the main config, so
