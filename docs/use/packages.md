@@ -1186,8 +1186,14 @@ publish checks run.
    Call `packagePublishExternalPush`. Kody checks the pushed tree server-side
    before recording the new published version, writing the published source
    snapshot, rebuilding package bundle artifacts, and refreshing search
-   projections. If the pushed HEAD is already current, the tool returns
-   `already_published`. If the package is locked, it returns `locked` with a
+   projections. If the package tip already matched HEAD before this request
+   began, the tool returns `already_published` (true no-op tip). That result
+   still runs the artifact rebuild and sets `artifacts_rebuilt` true when any
+   target needed rebuild or a forced snapshot repair ran. If `published_commit`
+   moved relative to that pre-request tip — including a durable re-entry after
+   an overlapping inline attempt advanced the tip — the status is `published`
+   with `previous_commit` set to the baseline tip, even when the repo session
+   already saw tip==HEAD. If the package is locked, it returns `locked` with a
    `pending_commit` and `approval_url` after checks pass and leaves
    `published_commit` unchanged. If it is internet-visible and its credential
    needs changed, it returns `approval_required` the same way (see

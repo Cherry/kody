@@ -180,13 +180,15 @@ async function filterTargetsNeedingRebuild(input: {
 	if (input.force) {
 		return {
 			remaining: [...input.targets],
-			alreadyBuilt: [],
+			alreadyBuilt: [] as Array<PublishedPackageArtifactBuildTarget>,
+			reused: [] as Array<PublishedPackageArtifactBuildTarget>,
 		}
 	}
 	const remaining: Array<PublishedPackageArtifactBuildTarget> = []
 	const alreadyBuilt: Array<PublishedPackageArtifactBuildTarget> = []
+	const reused: Array<PublishedPackageArtifactBuildTarget> = []
 	if (input.targets.length === 0) {
-		return { remaining, alreadyBuilt }
+		return { remaining, alreadyBuilt, reused }
 	}
 	// Load this rebuild's published snapshot once and pass that value to every
 	// target. A later rebuild loads again. Prior-commit snapshots are shared
@@ -217,7 +219,7 @@ async function filterTargetsNeedingRebuild(input: {
 			alreadyBuilt.push(target)
 			continue
 		}
-		const reused = await reusePublishedPackageArtifactIfUnchanged({
+		const didReuse = await reusePublishedPackageArtifactIfUnchanged({
 			env: input.env,
 			userId: input.userId,
 			sourceId: input.sourceId,
@@ -226,13 +228,15 @@ async function filterTargetsNeedingRebuild(input: {
 			snapshotCache,
 			...sharedSnapshot,
 		})
-		if (reused) {
-			alreadyBuilt.push(target)
+		if (didReuse) {
+			// Reuse copies prior-commit bytes under this tip — that is artifact
+			// work for artifacts_rebuilt, not a no-op skip.
+			reused.push(target)
 			continue
 		}
 		remaining.push(target)
 	}
-	return { remaining, alreadyBuilt }
+	return { remaining, alreadyBuilt, reused }
 }
 
 async function listTargetsOrThrow(input: {
@@ -259,6 +263,14 @@ async function listTargetsOrThrow(input: {
 	}
 }
 
+export type RebuildPublishedPackageArtifactsResult = {
+	/**
+	 * Targets that were not already built for this commit and therefore ran
+	 * rebuild or reuse work. Zero means every target was already current.
+	 */
+	rebuiltTargetCount: number
+}
+
 async function rebuildPublishedPackageArtifactsOnSession(input: {
 	env: Env
 	rpcSessionId: string
@@ -269,18 +281,20 @@ async function rebuildPublishedPackageArtifactsOnSession(input: {
 	baseUrl: string
 	targets: ReadonlyArray<PublishedPackageArtifactBuildTarget>
 	force?: boolean
-}) {
+}): Promise<RebuildPublishedPackageArtifactsResult> {
 	const session = repoSessionRpc(input.env, input.rpcSessionId)
 	const succeeded: Array<PublishedPackageArtifactBuildTarget> = []
-	const { remaining, alreadyBuilt } = await filterTargetsNeedingRebuild({
-		env: input.env,
-		userId: input.userId,
-		sourceId: input.sourceId,
-		publishedCommit: input.publishedCommit,
-		targets: input.targets,
-		force: input.force,
-	})
-	succeeded.push(...alreadyBuilt)
+	const { remaining, alreadyBuilt, reused } = await filterTargetsNeedingRebuild(
+		{
+			env: input.env,
+			userId: input.userId,
+			sourceId: input.sourceId,
+			publishedCommit: input.publishedCommit,
+			targets: input.targets,
+			force: input.force,
+		},
+	)
+	succeeded.push(...alreadyBuilt, ...reused)
 
 	const failed: Array<{
 		target: PublishedPackageArtifactBuildTarget
@@ -318,7 +332,9 @@ async function rebuildPublishedPackageArtifactsOnSession(input: {
 		}
 	}
 
-	if (failed.length === 0) return
+	if (failed.length === 0) {
+		return { rebuiltTargetCount: remaining.length + reused.length }
+	}
 
 	throwRebuildFailure({
 		sourceId: input.sourceId,
@@ -356,7 +372,7 @@ async function rebuildPublishedPackageArtifactsViaRepoSessionOnce(input: {
 	baseUrl: string
 	targets?: ReadonlyArray<PublishedPackageArtifactBuildTarget>
 	force?: boolean
-}) {
+}): Promise<RebuildPublishedPackageArtifactsResult> {
 	const session = repoSessionRpc(input.env, input.rpcSessionId)
 	const isolatedRunner = createIsolatedArtifactRebuildRunner(input.env)
 
@@ -369,11 +385,10 @@ async function rebuildPublishedPackageArtifactsViaRepoSessionOnce(input: {
 			publishedCommit: input.publishedCommit,
 			targets: input.targets,
 		})
-		await rebuildPublishedPackageArtifactsOnSession({
+		return await rebuildPublishedPackageArtifactsOnSession({
 			...input,
 			targets,
 		})
-		return
 	}
 
 	// List + skip before staging so already_published / repair resumes and
@@ -389,18 +404,23 @@ async function rebuildPublishedPackageArtifactsViaRepoSessionOnce(input: {
 		targets: input.targets,
 	})
 
-	const { remaining, alreadyBuilt } = await filterTargetsNeedingRebuild({
-		env: input.env,
-		userId: input.userId,
-		sourceId: input.sourceId,
-		publishedCommit: input.publishedCommit,
-		targets,
-		force: input.force,
-	})
+	const { remaining, alreadyBuilt, reused } = await filterTargetsNeedingRebuild(
+		{
+			env: input.env,
+			userId: input.userId,
+			sourceId: input.sourceId,
+			publishedCommit: input.publishedCommit,
+			targets,
+			force: input.force,
+		},
+	)
 	const succeeded: Array<PublishedPackageArtifactBuildTarget> = [
 		...alreadyBuilt,
+		...reused,
 	]
-	if (remaining.length === 0) return
+	if (remaining.length === 0) {
+		return { rebuiltTargetCount: reused.length }
+	}
 
 	let stagingKey: string
 	try {
@@ -495,7 +515,9 @@ async function rebuildPublishedPackageArtifactsViaRepoSessionOnce(input: {
 		await isolatedRunner.discard(stagingKey)
 	}
 
-	if (failed.length === 0) return
+	if (failed.length === 0) {
+		return { rebuiltTargetCount: remaining.length + reused.length }
+	}
 
 	throwRebuildFailure({
 		sourceId: input.sourceId,
@@ -516,14 +538,13 @@ export async function rebuildPublishedPackageArtifactsViaRepoSession(input: {
 	/** When set, rebuild only these targets instead of every package target. */
 	targets?: ReadonlyArray<PublishedPackageArtifactBuildTarget>
 	force?: boolean
-}) {
+}): Promise<RebuildPublishedPackageArtifactsResult> {
 	const maxAttempts = publishedPackageArtifactRebuildRetryDelaysMs.length + 1
 	let lastTransientError: unknown = null
 	for (let attemptIndex = 0; attemptIndex < maxAttempts; attemptIndex += 1) {
 		const attempt = attemptIndex + 1
 		try {
-			await rebuildPublishedPackageArtifactsViaRepoSessionOnce(input)
-			return
+			return await rebuildPublishedPackageArtifactsViaRepoSessionOnce(input)
 		} catch (error) {
 			if (!isTransientArtifactRebuildError(error)) {
 				throw error

@@ -234,7 +234,11 @@ function createContext(
 }
 
 function publish(
-	args: { allow_force?: boolean; confirm_destructive_overwrite?: boolean } = {},
+	args: {
+		allow_force?: boolean
+		confirm_destructive_overwrite?: boolean
+		baseline_published_commit?: string | null
+	} = {},
 	executionOrigin?: 'interactive' | 'background' | 'omit',
 ) {
 	return publishExternalPushCapability.handler(
@@ -441,6 +445,9 @@ test('publishExternalPush returns forwarded clone and check timings without coll
 		expect.objectContaining({
 			status: 'already_published',
 			published_commit: 'commit-old',
+			// Default module target is reused/skipped in this fixture; timings
+			// still include rebuild_ms even when no target needed a rebuild.
+			artifacts_rebuilt: false,
 			phase_timings: { clone_ms: 7, ...allPhaseTimings },
 		}),
 	)
@@ -471,6 +478,7 @@ test('publishExternalPush handles already_published branches, stale dependents, 
 	expect(await publish()).toEqual({
 		status: 'already_published',
 		published_commit: 'commit-old',
+		artifacts_rebuilt: true,
 		hosted_app_url: 'https://user.packages.kody.test/packages/demo-package',
 		static_dependents: noStaticDependents,
 		pending_secret_package_approvals: null,
@@ -492,7 +500,13 @@ test('publishExternalPush handles already_published branches, stale dependents, 
 		targets: [jobTarget],
 	})
 	mockModule.isPublishedPackageArtifactBuiltForCommit.mockResolvedValue(true)
-	expect((await publish()).status).toBe('already_published')
+	const skippedRebuild = await publish()
+	expect(skippedRebuild).toEqual(
+		expect.objectContaining({
+			status: 'already_published',
+			artifacts_rebuilt: false,
+		}),
+	)
 	expect(mockModule.rebuildPublishedPackageArtifact).not.toHaveBeenCalled()
 
 	setupDefaultMocks({
@@ -501,7 +515,13 @@ test('publishExternalPush handles already_published branches, stale dependents, 
 		targets: [jobTarget],
 	})
 	mockModule.isPublishedPackageArtifactBuiltForCommit.mockResolvedValue(true)
-	expect((await publish()).status).toBe('already_published')
+	const forcedRebuild = await publish()
+	expect(forcedRebuild).toEqual(
+		expect.objectContaining({
+			status: 'already_published',
+			artifacts_rebuilt: true,
+		}),
+	)
 	expect(mockModule.rebuildPublishedPackageArtifact).toHaveBeenCalledWith(
 		rebuildCall('commit-old', jobTarget),
 	)
@@ -678,6 +698,84 @@ test('budget exhaustion returns a dispatched handle', async () => {
 		expect.objectContaining({
 			userId: ownerIdFromStored('user-1'),
 			idempotencyParts: defaultPublishIdempotencyParts,
+			durableParams: expect.objectContaining({
+				baseline_published_commit: 'commit-old',
+			}),
+		}),
+	)
+})
+
+test('durable re-entry remaps RepoSession already_published to published when tip moved vs baseline', async () => {
+	// Single-attempt dispatched path: overlapping inline work advanced the tip,
+	// then durable re-entry sees tip==HEAD. Status must still be published.
+	setupDefaultMocks({
+		head: 'commit-new',
+		publish: {
+			status: 'already_published',
+			published_commit: 'commit-new',
+			phase_timings: { clone_ms: 3 },
+		},
+		targets: [moduleTarget],
+	})
+	// Tip in D1 already matches HEAD (as after the overlapping inline promote).
+	mockModule.getEntitySourceByIdForUser.mockResolvedValue(
+		sourceRow('commit-new'),
+	)
+
+	const remapped = await publish(
+		{ baseline_published_commit: 'commit-old' },
+		'background',
+	)
+	expect(remapped).toEqual({
+		status: 'published',
+		previous_commit: 'commit-old',
+		published_commit: 'commit-new',
+		manifest: null,
+		checks: [],
+		hosted_app_url: null,
+		static_dependents: noStaticDependents,
+		pending_secret_package_approvals: null,
+		allowed_packages_publish_notice: null,
+		phase_timings: { clone_ms: 3, ...allPhaseTimings },
+	})
+	expect(mockModule.runWithDurableEscalation).not.toHaveBeenCalled()
+	expect(mockModule.rebuildPublishedPackageArtifact).toHaveBeenCalledWith(
+		rebuildCall('commit-new', moduleTarget),
+	)
+
+	// True no-op: tip already matched HEAD before the request.
+	setupDefaultMocks({
+		head: 'commit-old',
+		publish: {
+			status: 'already_published',
+			published_commit: 'commit-old',
+		},
+	})
+	expect(
+		await publish({ baseline_published_commit: 'commit-old' }, 'background'),
+	).toEqual(
+		expect.objectContaining({
+			status: 'already_published',
+			published_commit: 'commit-old',
+			artifacts_rebuilt: false,
+		}),
+	)
+
+	// Interactive callers must not spoof baseline (null would force published).
+	setupDefaultMocks({
+		head: 'commit-old',
+		publish: {
+			status: 'already_published',
+			published_commit: 'commit-old',
+		},
+	})
+	expect(
+		await publish({ baseline_published_commit: null }, 'interactive'),
+	).toEqual(
+		expect.objectContaining({
+			status: 'already_published',
+			published_commit: 'commit-old',
+			artifacts_rebuilt: false,
 		}),
 	)
 })
@@ -770,9 +868,9 @@ test('publishExternalPush recovers from transient Durable Object resets', async 
 	expect(consoleWarn).toHaveBeenCalledTimes(1)
 
 	setupDefaultMocks()
-	mockModule.getEntitySourceByIdForUser
-		.mockResolvedValueOnce(sourceRow('commit-old'))
-		.mockResolvedValueOnce(sourceRow('commit-new'))
+	mockModule.getEntitySourceByIdForUser.mockResolvedValue(
+		sourceRow('commit-old'),
+	)
 	mockModule.publishFromExternalRef
 		.mockRejectedValueOnce(
 			new Error(
@@ -783,9 +881,13 @@ test('publishExternalPush recovers from transient Durable Object resets', async 
 			status: 'already_published',
 			published_commit: 'commit-new',
 		})
+	// Tip advanced during the failed attempt; remap to published vs pre-request tip.
 	expect(await publish()).toEqual({
-		status: 'already_published',
+		status: 'published',
+		previous_commit: 'commit-old',
 		published_commit: 'commit-new',
+		manifest: null,
+		checks: [],
 		hosted_app_url: null,
 		static_dependents: noStaticDependents,
 		pending_secret_package_approvals: null,
