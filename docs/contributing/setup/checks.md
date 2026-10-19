@@ -34,11 +34,11 @@ pushes. See the [setup index](./index.md) for the other setup pages.
   workers-unit leg is not a silent hang (#3547); ADR 0011 workers-unit isolation
   is unchanged. A docs-only range skips knip and the suites. A push that changes
   `skills-lock.json` or any path under `.agents/skills/` also runs
-  `npm run skills-lock:check`. `skills-lock.json` counts with docs for this
-  hook: a push of only the lock, skill markdown, and other docs skips `knip` and
-  `test:push`. A non-markdown file under `.agents/skills/` (a script or a test)
-  still runs `knip` and `test:push`, as does any other source file. An
-  unreadable push path list runs the skills-lock check too. Deleting a remote
+  `node tools/check-skills-lock.ts`. `skills-lock.json` counts with docs for
+  this hook: a push of only the lock, skill markdown, and other docs skips
+  `knip` and `test:push`. A non-markdown file under `.agents/skills/` (a script
+  or a test) still runs `knip` and `test:push`, as does any other source file.
+  An unreadable push path list runs the skills-lock check too. Deleting a remote
   branch skips knip, the suites, and the skills-lock check. An update diffs the
   remote tip against the local tip, so a later docs-only push does not retest
   commits already on the remote. A new branch diffs against the merge base of
@@ -142,7 +142,7 @@ pushes. See the [setup index](./index.md) for the other setup pages.
   reinstall it from kentcdodds/kcd-skills) and its `computedHash` must match the
   folder hash. Edit the skill and refresh `computedHash`, or the check fails.
   `install:check` stays on the git hooks / `prevalidate` path and is not part of
-  this group. Per-check scripts still exist for targeted runs.
+  this group.
 - `npm run soft-delete-read-filter:check` and `npm run error-agent-prompt:check`
   run in local `validate` and the CI static job (they are not part of the docs
   or deps groups).
