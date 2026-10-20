@@ -24,11 +24,12 @@ export JSDoc stay in [Package authoring](./package-authoring.md)
 A package app is a hosted **Worker entry**. `kody.app.entry` default-exports a
 fetch handler (a function, `{ fetch }`, or a named `fetch` export). Anything
 esbuild can bundle that answers `fetch` is a valid app. The host strips the app
-mount before forwarding, so every entry sees `/notes` for
-`/packages/<id>/notes`. Optional `kody.app.client` and `kody.app.assets` add a
-browser module and static files under `/_assets`. `kody:runtime` exposes
-`packageContext`, `packageStorage()`, and the rest of the run. Remix is
-[Example A](#remix-recipe) — a recipe with its own boilerplate, not a host mode.
+mount before forwarding, so every entry sees `/notes` for `/<id>/notes` (legacy
+`/packages/<id>/notes` still works). Optional `kody.app.client` and
+`kody.app.assets` add a browser module and static files under `/_assets`.
+`kody:runtime` exposes `packageContext`, `packageStorage()`, and the rest of the
+run. Remix is [Example A](#remix-recipe) — a recipe with its own boilerplate,
+not a host mode.
 
 Open a heading with `search({ entity: "guide:package_apps#remix-recipe" })` (or
 another slug below) when you need one recipe.
@@ -73,7 +74,7 @@ conventions, shared helpers, or an existing package to extend.
 The host contract is the same for every app:
 
 - **entry** — `kody.app.entry`, a Worker fetch handler. The host strips the
-  mount (`/packages/<package-name>/notes` → `/notes`)
+  mount (`/<package-name>/notes` → `/notes`)
 - **browser entry** — optional `kody.app.client`; the platform bundles it for
   the browser on publish (see
   [Browser client and static assets](#browser-client-and-static-assets))
@@ -91,11 +92,12 @@ A one-file fetch handler is a complete app (see
 
 ## Session handoff
 
-Production-hosted apps live at
-`https://{username}.kody.run/packages/<package-name>/…` (and on verified custom
-domains). That URL is the app. `https://kody.codes/@{username}/packages/…` is
-not the hosted origin: visitors who may run the app hand off to it; everyone
-else stays on the package page (or a same-origin landing).
+Production-hosted apps live at `https://{username}.kody.run/<package-name>/…`
+(and on verified custom domains). That URL is the app. Legacy
+`/packages/<package-name>/…` on the same host still serves during the cutover.
+`https://kody.codes/@{username}/packages/…` is not the hosted origin: visitors
+who may run the app hand off to it; everyone else stays on the package page (or
+a same-origin landing).
 
 **Open app** is one control. For someone who may run the app it goes to
 `/@{username}/packages/<name>/open` on kody.codes, which mints a short-lived
@@ -113,8 +115,9 @@ is the client. Consent and sign-in stay on kody.codes; authorization codes +
 PKCE land a per-app host-only `__Host-kody_pkg_session_<hash>` cookie on the app
 origin (`*.kody.run` or a verified custom domain). Shared hosts keep one cookie
 per package leaf so logout of one app does not sign the visitor out of siblings.
-Redirect URIs are limited to `/_kody/auth/callback` on those origins. **Open
-app** still uses the `/open` handoff path until in-app OAuth fully replaces it.
+Redirect URIs are limited to `/-/auth/callback` on those origins (legacy
+`/_kody/auth/callback` still accepted). **Open app** still uses the `/open`
+handoff path until in-app OAuth fully replaces it.
 
 Near-zero-config helper:
 
@@ -138,15 +141,16 @@ export async function loader({ request }: { request: Request }) {
 }
 ```
 
-Platform routes on every package-app host (host root, not under
-`/packages/{leaf}`):
+Platform routes on every package-app host (host root, not under `/{leaf}`):
 
-| Path                                           | Role                               |
-| ---------------------------------------------- | ---------------------------------- |
-| `GET /_kody/auth/login?app={leaf}&return_to=…` | Start PKCE; redirect to kody.codes |
-| `GET /_kody/auth/callback`                     | Exchange code; set per-app session |
-| `GET\|POST /_kody/auth/logout?app={leaf}`      | Clear that app's session only      |
-| `GET /_kody/auth/me?app={leaf}`                | Current user JSON                  |
+| Path                                       | Role                               |
+| ------------------------------------------ | ---------------------------------- |
+| `GET /-/auth/login?app={leaf}&return_to=…` | Start PKCE; redirect to kody.codes |
+| `GET /-/auth/callback`                     | Exchange code; set per-app session |
+| `GET\|POST /-/auth/logout?app={leaf}`      | Clear that app's session only      |
+| `GET /-/auth/me?app={leaf}`                | Current user JSON                  |
+
+Legacy `/_kody/auth/*` paths remain accepted on the same hosts.
 
 Default claims: user id, name, avatar, and access level for the app. Email only
 when requested and consented. Consent is skipped for apps the user (or their
@@ -205,9 +209,9 @@ files. See
 [Package lifecycle → Mock outbound fetch](./package-lifecycle.md#mock-outbound-fetch-with-.kody-mocks.ts).
 
 `kody dev` serves at base path `''` by default (`--ready-file` reports
-`basePath`). Hosted apps mount at `/packages/<package-name>`. Pass
-`--app-base-path /packages/<package-name>` when you need the local proxy to
-strip the same mount and set `packageContext.appBasePath` to match production.
+`basePath`). Hosted apps mount at `/<package-name>`. Pass
+`--app-base-path /<package-name>` when you need the local proxy to strip the
+same mount and set `packageContext.appBasePath` to match production.
 
 While it runs, `kody dev`:
 
@@ -367,7 +371,7 @@ When the app imports a `@remix-run/ui/<primitive>` module, add
 ```
 
 `app/routes.ts` — the typed URL contract. Hosted apps live under a mount
-(`/packages/<package-name>` on the subdomain), so the contract is prefixed with
+(`/<package-name>` on the subdomain), so the contract is prefixed with
 `packageContext.appBasePath`: every `href()`, redirect, and form action then
 stays inside the mount, and the router matches the URL the browser requested.
 This module is server-only (it imports `kody:runtime`); pass URLs to islands as
@@ -803,10 +807,10 @@ declaration (`KodyRuntime`, `packageContext`, `packageStorage`, …).
 
 ## Remix troubleshooting
 
-- **Every hosted path returns `Not Found: /packages/<name>/…`** — the route
-  contract has no mount prefix, or `app/router.ts` does not remount the Request.
-  Build the contract with `route(packageContext?.appBasePath ?? '', …)` and
-  remount before `router.fetch`.
+- **Every hosted path returns `Not Found: /<name>/…`** — the route contract has
+  no mount prefix, or `app/router.ts` does not remount the Request. Build the
+  contract with `route(packageContext?.appBasePath ?? '', …)` and remount before
+  `router.fetch`.
 - **A link or redirect lands on the host root (`/about` → 404)** — a
   root-relative literal bypassed the contract. Add the route and use
   `routes.about.href()`.
@@ -971,9 +975,9 @@ callback from `packageContext.appBasePath` plus `hostedUrl` (or
 `new URL(path, origin)` with a trailing-slash-safe origin). Kody strips the
 mount before the handler runs, so every entry sees `/<path>` only. Absolute
 `/audio/123` links leave the mount; mount-prefixed URLs stay under
-`/packages/<package-name>/…` (or `/@username/packages/<package-name>/…` when
-served inline). A Remix recipe that prefixes its route contract remounts the
-Request in the entry (see [Mount and URLs](#mount-and-urls)).
+`/<package-name>/…` (or `/@username/packages/<package-name>/…` when served
+inline). A Remix recipe that prefixes its route contract remounts the Request in
+the entry (see [Mount and URLs](#mount-and-urls)).
 
 ```ts
 import { packageContext } from 'kody:runtime'
@@ -994,9 +998,9 @@ const callback = appUrl('oauth/callback')
 ```
 
 `hostedUrl` is the public mount URL. `appBasePath` is the origin-relative mount
-(`/packages/<package-name>` on a subdomain). Both come from the current serving
-username and package name leaf, including after a rename or fork. When you pass
-a relative path to `new URL(path, origin)`, give `origin` a trailing slash so
+(`/<package-name>` on a subdomain). Both come from the current serving username
+and package name leaf, including after a rename or fork. When you pass a
+relative path to `new URL(path, origin)`, give `origin` a trailing slash so
 `assets/sprite.png` stays under the mount.
 
 Files the platform serves for you (the bundled browser client and the
@@ -1254,8 +1258,8 @@ runtime instead; the platform gives you two ways:
 
 ```json
 {
-	"clientModuleUrl": "https://you.kody.run/packages/counter/_assets/client.83T6UIqNQEvueSq_.js",
-	"assetBasePath": "/packages/counter/_assets",
+	"clientModuleUrl": "https://you.kody.run/counter/_assets/client.83T6UIqNQEvueSq_.js",
+	"assetBasePath": "/counter/_assets",
 	"publishedCommit": "0f3c…"
 }
 ```
@@ -1269,9 +1273,8 @@ slash-terminated app mount as its scope. The canonical pair is:
 
 A scope that does not start with that header value is rejected by the browser
 with a `SecurityError`, so register exactly `${appBase}/`. The trailing slash
-matters: scope matching is a string-prefix check, so a scope of `/packages/app`
-would also claim the sibling mount `/packages/app-secret`; `/packages/app/`
-cannot.
+matters: scope matching is a string-prefix check, so a scope of `/app` would
+also claim the sibling mount `/app-secret`; `/app/` cannot.
 
 ```ts
 // in the page (src/client/index.ts)
@@ -1296,13 +1299,13 @@ self.addEventListener('install', (event) => {
 })
 ```
 
-Scope boundary: the bare mount URL (`hostedUrl`, `/packages/app` with no
-trailing slash — where the handoff lands) sits outside a `/packages/app/` scope,
-so the worker controls every page under the mount but not a document loaded at
-that exact URL. Link and redirect to slash-terminated paths inside the app
-(`${appBase}/`, `${appBase}/settings`) so the pages people spend time on are
-controlled; the root visit still gets the module straight from the platform with
-its immutable cache header.
+Scope boundary: the bare mount URL (`hostedUrl`, `/app` with no trailing slash —
+where the handoff lands; legacy `/packages/app` behaves the same) sits outside
+an `/app/` scope, so the worker controls every page under the mount but not a
+document loaded at that exact URL. Link and redirect to slash-terminated paths
+inside the app (`${appBase}/`, `${appBase}/settings`) so the pages people spend
+time on are controlled; the root visit still gets the module straight from the
+platform with its immutable cache header.
 
 Static `assets` paths are not fingerprinted (they carry a commit-scoped `ETag`
 and a five-minute max-age), so precache them keyed by `publishedCommit` and drop
