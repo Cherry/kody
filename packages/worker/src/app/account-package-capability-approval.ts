@@ -24,6 +24,7 @@ import { buildPackageCapabilityApprovalUrl } from '#worker/package-capabilities/
 import {
 	applyMatchingPinInternetVisible,
 	attemptSelfPublish,
+	explainSelfPublishBlocker,
 } from '#worker/package-capabilities/self-publish.ts'
 import {
 	enqueueWentPublicApproval,
@@ -92,6 +93,12 @@ export async function loadAccountPackageApproveCapabilitiesData(input: {
 		kodyId: savedPackage.kodyId,
 	})
 
+	const approvalUrl = buildPackageCapabilityApprovalUrl({
+		baseUrl: new URL(input.request.url).origin,
+		username,
+		kodyId: savedPackage.kodyId,
+	})
+
 	const [pendingApprovals, securityAudit] = await Promise.all([
 		loadPendingPackageApprovals({
 			env: input.env,
@@ -106,11 +113,7 @@ export async function loadAccountPackageApproveCapabilitiesData(input: {
 			packageName: savedPackage.name,
 			publishedCommit: summary.publishedCommit,
 			fingerprint: summary.capabilitySet.fingerprint,
-			approvalUrl: buildPackageCapabilityApprovalUrl({
-				baseUrl: new URL(input.request.url).origin,
-				username,
-				kodyId: savedPackage.kodyId,
-			}),
+			approvalUrl,
 		}),
 	])
 
@@ -123,6 +126,29 @@ export async function loadAccountPackageApproveCapabilitiesData(input: {
 		? (pendingApprovals.find((approval) => approval.reason === 'went_public')
 				?.id ?? null)
 		: null
+
+	// Show why Approve is needed when going public is pending, or when the
+	// capability set still needs a pin before internet-visible serving.
+	const showSelfPublishBlocker =
+		goPublicRequestId != null ||
+		(!savedPackage.isInternetVisible && !summary.fingerprintMatchesApproval)
+
+	// Informational only: never let detail evaluation take down Approve.
+	// Omit approvalUrl so the page does not say "Owner approves at" itself.
+	let selfPublishBlockerDetail: Awaited<
+		ReturnType<typeof explainSelfPublishBlocker>
+	> = null
+	if (showSelfPublishBlocker) {
+		try {
+			selfPublishBlockerDetail = await explainSelfPublishBlocker({
+				env: input.env,
+				savedPackage,
+				summary,
+			})
+		} catch {
+			selfPublishBlockerDetail = null
+		}
+	}
 
 	return {
 		ok: true,
@@ -145,6 +171,14 @@ export async function loadAccountPackageApproveCapabilitiesData(input: {
 		// latest approval (which may be a different capability set).
 		latestApprovedAt: summary.matchingApproval?.approvedAt ?? null,
 		securityAudit,
+		selfPublishBlocker:
+			showSelfPublishBlocker && selfPublishBlockerDetail
+				? {
+						blocker: selfPublishBlockerDetail.blocker,
+						message: selfPublishBlockerDetail.message,
+						reasons: selfPublishBlockerDetail.reasons,
+					}
+				: null,
 		settingsHref,
 		packageHref,
 		approveHref,
@@ -505,6 +539,7 @@ async function changePackageCapabilityApproval(
 			actorUserId,
 			savedPackage,
 			summary,
+			approvalUrl,
 		})
 		if (attempt.status === 'self_published') {
 			return accepted()
@@ -578,8 +613,14 @@ async function changePackageCapabilityApproval(
 			fingerprint: summary.capabilitySet.fingerprint,
 			approvalUrl,
 		})
+		const blockerStep =
+			attempt.status === 'blocked'
+				? attempt.detail.message
+				: 'Review the credentials and capabilities on the approval page. One Approve records them and makes this package internet-visible.'
 		const approvalStep =
-			'Review the credentials and capabilities on the approval page. One Approve records them and makes this package internet-visible.'
+			attempt.status === 'blocked'
+				? `${blockerStep} One Approve records the capability set and makes this package internet-visible.`
+				: blockerStep
 		return packageMutationResult(
 			{
 				ok: false,
@@ -588,6 +629,13 @@ async function changePackageCapabilityApproval(
 					: approvalStep,
 				approvalUrl,
 				...(securityAudit ? { securityAudit } : {}),
+				...(attempt.status === 'blocked'
+					? {
+							selfPublishBlocker: attempt.blocker,
+							selfPublishBlockerReasons: attempt.reasons,
+							selfPublishBlockerMessage: attempt.detail.message,
+						}
+					: {}),
 			},
 			400,
 		)
