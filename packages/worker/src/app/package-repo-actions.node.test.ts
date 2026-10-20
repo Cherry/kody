@@ -170,7 +170,7 @@ test('buildSourceAheadPublishHref names the HEAD commit when present', () => {
 	)
 })
 
-test('open app hands off only for someone who may run the app', async () => {
+test('open app uses the /open handoff path for runners', async () => {
 	const env = {
 		PACKAGE_APP_BASE_URL: 'https://packages.isolated.test',
 	} as unknown as Env
@@ -182,19 +182,36 @@ test('open app hands off only for someone who may run the app', async () => {
 		hasApp: true,
 		requestUrl: 'https://kody.test/@kentcdodds/github-triage',
 	}
+	// Runners always get the self-describing handoff path; no second host button.
 	await expect(
 		resolvePackageAppLinks({ ...shared, viewerMayRun: true }),
 	).resolves.toEqual({
-		packageAppHref: '/@kentcdodds/packages/github-triage',
-		packageAppOriginHref:
-			'https://kentcdodds.packages.isolated.test/packages/github-triage',
+		packageAppHref: '/@kentcdodds/packages/github-triage/open',
+		packageAppOriginHref: null,
 	})
-	// No approved capability set is visible, so a reader does not get a public
-	// Open app that would 403 on the hosted origin.
+	// Readers do not get a public Open app that would 403 on the hosted origin.
 	await expect(
 		resolvePackageAppLinks({ ...shared, viewerMayRun: false }),
 	).resolves.toEqual({
 		packageAppHref: null,
+		packageAppOriginHref: null,
+	})
+})
+
+test('inline deploy keeps the bare mount for runners (no /open in the address bar)', async () => {
+	const env = {} as unknown as Env
+	await expect(
+		resolvePackageAppLinks({
+			env,
+			username: 'kentcdodds',
+			kodyId: 'github-triage',
+			hasPackage: true,
+			hasApp: true,
+			viewerMayRun: true,
+			requestUrl: 'https://kody.test/@kentcdodds/github-triage',
+		}),
+	).resolves.toEqual({
+		packageAppHref: '/@kentcdodds/packages/github-triage',
 		packageAppOriginHref: null,
 	})
 })

@@ -3,7 +3,7 @@ import {
 	setPackageVisibility,
 	setPackageInternetVisible,
 } from '#start/server/package-mutations'
-import { buildPackageAppPath } from '@kody-internal/shared/public-urls.ts'
+import { buildPackageAppOpenPath } from '@kody-internal/shared/public-urls.ts'
 import { type CSSObject } from '@emotion/react'
 import { useState } from 'react'
 import { usePackageMutation } from '../package-mutation.ts'
@@ -39,50 +39,16 @@ import { PackagePublishingPanel } from './account-package-publishing-panel.tsx'
 import { AccountPackageForkAdoption } from './account-package-fork-adoption.tsx'
 import { type AccountPackageDetail } from '#universal/loader-data.ts'
 
-function PackageAppLinks(props: {
-	openHref: string | null
-	originHref?: string | null
-}) {
+function PackageAppLinks(props: { openHref: string | null }) {
 	if (!props.openHref) return 'No app'
-	const origin =
-		props.originHref && props.originHref !== props.openHref
-			? props.originHref
-			: null
-	let originLabel = origin
-	if (origin) {
-		try {
-			originLabel = new URL(origin).host
-		} catch {
-			originLabel = origin
-		}
-	}
 	return (
-		<span
-			css={{
-				display: 'inline-flex',
-				flexWrap: 'wrap',
-				alignItems: 'center',
-				gap: '0.75rem',
-			}}
+		<a
+			href={props.openHref}
+			data-testid="open-package-app"
+			css={packageAppLinkCss}
 		>
-			<a
-				href={props.openHref}
-				data-testid="open-package-app"
-				css={packageAppLinkCss}
-			>
-				{renderIcon('share', { size: '1em' })} Open Package App
-			</a>
-			{origin ? (
-				<a
-					href={origin}
-					data-testid="package-app-origin-link"
-					aria-label={`Open the app at ${originLabel}`}
-					css={packageAppLinkCss}
-				>
-					{originLabel}
-				</a>
-			) : null}
-		</span>
+			{renderIcon('share', { size: '1em' })} Open Package App
+		</a>
 	)
 }
 
@@ -113,8 +79,6 @@ export function AccountPackageOwnerDetails(props: {
 	 * the path mount. Null means the package has no app link.
 	 */
 	packageAppHref?: string | null
-	/** Canonical hosted origin when Open app is the handoff path instead. */
-	packageAppOriginHref?: string | null
 }) {
 	const visibilityMutation = usePackageMutation(
 		props.packageDetail.id,
@@ -522,12 +486,11 @@ export function AccountPackageOwnerDetails(props: {
 								openHref={
 									props.packageAppHref !== undefined
 										? props.packageAppHref
-										: buildPackageAppPath({
+										: buildPackageAppOpenPath({
 												username: props.ownerUsername,
 												kodyId: packageDetail.kodyId,
 											})
 								}
-								originHref={props.packageAppOriginHref}
 							/>
 						) : (
 							'No app'

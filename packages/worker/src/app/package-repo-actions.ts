@@ -1,4 +1,7 @@
-import { buildPackageAppPath } from '@kody-internal/shared/public-urls.ts'
+import {
+	buildPackageAppOpenPath,
+	buildPackageAppPath,
+} from '@kody-internal/shared/public-urls.ts'
 import { type PublicCommunityListing } from '#app/community-public.ts'
 import { type PackagePageAccess } from '#app/package-page.ts'
 import { resolveInternetVisibleApprovedCommit } from '#app/package-app-internet-visible.ts'
@@ -62,8 +65,8 @@ export function buildPackageRepoActions(input: {
 	/** Set when the page names a followable package or plain repo. */
 	follow?: { kind: 'package' | 'repo'; viewerFollowing: boolean } | null
 	/**
-	 * Overrides the owner path mount. The page loader sets this to the
-	 * handoff entry or the canonical hosted origin.
+	 * Overrides the owner Open app href. The page loader sets this to the
+	 * `/open` handoff path or the canonical hosted origin for readers.
 	 */
 	packageAppHref?: string | null
 	/** Canonical kody.run or custom-domain URL, when one exists. */
@@ -102,7 +105,7 @@ export function buildPackageRepoActions(input: {
 		input.packageAppHref !== undefined
 			? input.packageAppHref
 			: input.viewerIsOwner && input.ownerPackage?.hasApp === true
-				? buildPackageAppPath({
+				? buildPackageAppOpenPath({
 						username: input.username,
 						kodyId: input.kodyId,
 					})
@@ -132,15 +135,15 @@ type PackageAppLinkFlags = {
 }
 
 /**
- * Href for "Open app", plus the canonical hosted origin when it differs.
+ * Href for the single "Open app" control.
  *
- * The handoff path is only for someone who may run the app (`app:execute`).
- * `*.kody.run` and custom domains authenticate through that token, so a
- * reader who cannot execute must not be sent there. Everyone else gets the
- * canonical origin only when the app is actually served anonymously (an
- * approved internet-visible capability set). The flag alone is not enough:
- * an unapproved app 403s on the hosted origin. Inline deployments keep the
- * path mount, because that is where the app runs.
+ * Someone who may run the app (`app:execute`) gets the self-describing
+ * handoff path `/@{user}/packages/{name}/open`, which mints a session token
+ * and redirects to the hosted origin from
+ * {@link resolvePublicPackageAppLocation}. Readers who cannot execute get
+ * that hosted URL only when the app is approved for anonymous serving.
+ * Inline deployments (no `PACKAGE_APP_BASE_URL`) keep the path mount. There
+ * is no second host button: `packageAppOriginHref` stays null.
  */
 export async function resolvePackageAppLinks(input: {
 	env: Env
@@ -170,20 +173,32 @@ export async function resolvePackageAppLinks(input: {
 		(input.viewerMayRun === undefined && input.viewer
 			? await viewerMayRunPackageApp(input)
 			: false)
-	// Runners already get the handoff path. The approval lookup only decides
-	// whether everyone else may see the public origin.
-	const publiclyServable = mayRun ? false : await appIsPubliclyServable(input)
 	const pathHref = buildPackageAppPath({
+		username: input.username,
+		kodyId: input.kodyId,
+	})
+	const openHref = buildPackageAppOpenPath({
 		username: input.username,
 		kodyId: input.kodyId,
 	})
 	const packageAppOrigin = getPackageAppBaseUrl({ env: input.env })
 	if (!packageAppOrigin) {
+		// Inline deploy: the app origin serves the package. Stay on the bare
+		// mount so client routers match packageAppBasePath. /open is only for
+		// handoff onto a separate hosted origin.
+		const publiclyServable = mayRun ? false : await appIsPubliclyServable(input)
 		return {
 			packageAppHref: mayRun || publiclyServable ? pathHref : null,
 			packageAppOriginHref: null,
 		}
 	}
+	if (mayRun) {
+		return {
+			packageAppHref: openHref,
+			packageAppOriginHref: null,
+		}
+	}
+	const publiclyServable = await appIsPubliclyServable(input)
 	const canonical =
 		(
 			await resolvePublicPackageAppLocation({
@@ -192,16 +207,10 @@ export async function resolvePackageAppLinks(input: {
 				kodyId: input.kodyId,
 			})
 		)?.hostedUrl ?? null
-	if (mayRun) {
-		return {
-			packageAppHref: pathHref,
-			packageAppOriginHref: canonical,
-		}
-	}
 	if (publiclyServable && canonical) {
 		return {
 			packageAppHref: canonical,
-			packageAppOriginHref: canonical,
+			packageAppOriginHref: null,
 		}
 	}
 	return { packageAppHref: null, packageAppOriginHref: null }

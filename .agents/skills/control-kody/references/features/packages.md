@@ -24,3 +24,8 @@ limitations.
 - Org list: `/@{$orgSlug}/-/repositories` (legacy `/@{$orgSlug}/-/packages`
   301s)
 - JSON list: `/account/packages.json`
+- Package header: one primary `Open app` (`data-testid="open-package-app"`).
+  Viewers who may run the app get the handoff Open app href under
+  packages/`…`/`open` (self-describing; not a Start route). There is no
+  host-labeled secondary open button (`package-app-origin-link` is not in the
+  title action group).
