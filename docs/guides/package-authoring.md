@@ -400,7 +400,9 @@ When a package will use user-scoped secrets (`{{secret:name}}` placeholders or
 `kody.secretMounts`):
 
 1. Ensure each secret exists (open `search({ entity: "guide:connect_secret" })`
-   / `search({ entity: "guide:secret_backed_integration" })`).
+   / `search({ entity: "guide:secret_backed_integration" })`). New secrets
+   default to headers-only fill placement
+   ([Credentials](./credentials.md#keys-and-placeholders)).
 2. Self-authored packages and community forks the owner adopted on the website
    after a real source review get automatic read/use access to user secrets
    (host approval still applies; `secretSet` / `secretDelete` still need an
