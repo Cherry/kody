@@ -5,6 +5,7 @@ import {
 	type UsageOutcome,
 	usageAttributionFieldsFromRequest,
 } from './record-usage.ts'
+import { sanitizeUsageErrorName } from './usage-error-name.ts'
 
 /**
  * Host-side sink for `package_static_call` usage events reported by the
@@ -15,11 +16,13 @@ import {
  * Trust model: the callee package id is stamped into generated import-proxy
  * code by the bundler, never taken from author-supplied strings. Generated
  * code still runs inside the sandbox realm, though, so the host validates
- * every reported id against the bundle's *direct* static dependency package ids
- * recorded at build time (a strict subset of the `packageStorage()` grant
- * set, which additionally grants the run's own package id and
- * dynamic-import dependencies) and silently drops anything else. A
- * malicious module can therefore at worst inflate call counts for packages
+ * every reported id against the bundle's static dependency package ids
+ * recorded at build time — direct and transitive (re-export chains meter at
+ * the innermost layer, with the outermost import id as a fallback when the
+ * artifact predates transitive listing). That set is still a strict subset
+ * of the `packageStorage()` grant set, which additionally grants the run's
+ * own package id and dynamic-import dependencies. Anything else is dropped.
+ * A malicious module can therefore at worst inflate call counts for packages
  * its own bundle already statically depends on — it can never attribute
  * usage to an arbitrary package.
  *
@@ -49,6 +52,8 @@ type PendingStaticCallEvent = {
 	packageId: string
 	durationMs: number | null
 	outcome: Extract<UsageOutcome, 'success' | 'error'>
+	/** Sanitized name/code; empty when the sandbox did not report one. */
+	errorName: string
 }
 
 /**
@@ -66,10 +71,10 @@ export function createPackageStaticCallMeterTools(input: {
 	userId: string | null | undefined
 	request?: RequestContext | null
 	/**
-	 * Saved-package UUIDs recorded as direct static dependencies of the running
-	 * bundle at build time (`bundle.dependencies`), from bundler/host
-	 * controlled provenance only. Reported events whose stamped id is not
-	 * in this set are dropped.
+	 * Saved-package UUIDs recorded as static dependencies of the running
+	 * bundle at build time (`bundle.dependencies`, direct and transitive),
+	 * from bundler/host controlled provenance only. Reported events whose
+	 * stamped id is not in this set are dropped.
 	 */
 	grantedPackageIds: ReadonlySet<string>
 }): PackageStaticCallMeterTools | undefined {
@@ -110,6 +115,9 @@ export function createPackageStaticCallMeterTools(input: {
 						entityId: event.packageId,
 						durationMs: event.durationMs,
 						outcome,
+						...(outcome !== 'success' && event.errorName
+							? { errorName: event.errorName }
+							: {}),
 						...usageAttributionFieldsFromRequest(input.request),
 					})
 				}
@@ -131,11 +139,24 @@ function acceptStaticCallEvent(input: {
 			: {}
 	const packageId =
 		typeof rawEvent.packageId === 'string' ? rawEvent.packageId : ''
-	if (!packageId || !input.grantedPackageIds.has(packageId)) {
+	const fallbackPackageId =
+		typeof rawEvent.fallbackPackageId === 'string'
+			? rawEvent.fallbackPackageId
+			: ''
+	// Prefer the innermost stamped id when granted. Older published artifacts
+	// may lack transitive dependency rows, so fall back to the outermost
+	// re-export import id (still bundler-stamped) rather than dropping the
+	// event entirely.
+	const grantedPackageId = input.grantedPackageIds.has(packageId)
+		? packageId
+		: fallbackPackageId && input.grantedPackageIds.has(fallbackPackageId)
+			? fallbackPackageId
+			: ''
+	if (!grantedPackageId) {
 		console.debug(
 			'package-static-call-usage-dropped',
 			'stamped package id is not a static dependency of this run',
-			packageId,
+			packageId || fallbackPackageId,
 		)
 		return null
 	}
@@ -150,5 +171,11 @@ function acceptStaticCallEvent(input: {
 		rawEvent.durationMs >= 0
 			? rawEvent.durationMs
 			: null
-	return { packageId, durationMs, outcome }
+	const errorName =
+		outcome === 'error'
+			? sanitizeUsageErrorName(
+					typeof rawEvent.errorName === 'string' ? rawEvent.errorName : '',
+				)
+			: ''
+	return { packageId: grantedPackageId, durationMs, outcome, errorName }
 }

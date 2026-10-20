@@ -559,7 +559,60 @@ export function __kodyCreatePackageBoundSecrets(packageId) {
 	};
 }
 
-function __kodyRecordStaticPackageCall(packageId, startedAtMs, outcome) {
+// Proxies created by __kodyMeterStaticPackageExport. When a re-export chain
+// wraps an already-metered export, only the innermost apply that invokes the
+// real target records — outer layers skip so one throw is one event. The
+// outermost package id is carried as fallbackPackageId so hosts whose bundle
+// metadata predates transitive dependency listing can still grant the write.
+const __kodyMeteredStaticPackageExports = new WeakSet();
+const __kodyStaticCallChainAls = new AsyncLocalStorage();
+
+function __kodySanitizeStaticCallErrorName(raw) {
+	if (typeof raw !== 'string') return '';
+	const trimmed = raw.trim().slice(0, 96);
+	if (!trimmed || !/^[A-Za-z0-9._:-]+$/.test(trimmed)) return '';
+	return trimmed;
+}
+
+function __kodyStaticCallErrorName(error) {
+	try {
+		if (error == null) return '';
+		if (typeof error === 'string') {
+			const match = /^\\[([A-Za-z0-9._:-]{1,96})\\]/.exec(error.trim());
+			return __kodySanitizeStaticCallErrorName(match?.[1]);
+		}
+		if (typeof error !== 'object') return '';
+		const code = error.code;
+		if (typeof code === 'string') {
+			const fromCode = __kodySanitizeStaticCallErrorName(code);
+			if (fromCode) return fromCode;
+		}
+		const bodyCode = error.body?.code;
+		if (typeof bodyCode === 'string') {
+			const fromBody = __kodySanitizeStaticCallErrorName(bodyCode);
+			if (fromBody) return fromBody;
+		}
+		const message = error.message;
+		if (typeof message === 'string') {
+			const match = /^\\[([A-Za-z0-9._:-]{1,96})\\]/.exec(message.trim());
+			const fromMessage = __kodySanitizeStaticCallErrorName(match?.[1]);
+			if (fromMessage) return fromMessage;
+		}
+		const name = error.name;
+		if (typeof name === 'string') {
+			return __kodySanitizeStaticCallErrorName(name);
+		}
+	} catch {}
+	return '';
+}
+
+function __kodyRecordStaticPackageCall(
+	packageId,
+	startedAtMs,
+	outcome,
+	errorName,
+	fallbackPackageId,
+) {
 	// Metering must never block or throw into the call path: reporting is a
 	// synchronous buffer push into the current run's meter (the surrounding
 	// wrapper flushes the buffer over the host bridge once, at the end of
@@ -569,11 +622,22 @@ function __kodyRecordStaticPackageCall(packageId, startedAtMs, outcome) {
 	try {
 		const meter = __kodyRuntimeStorage.getStore()?.__kodyStaticCallMeter;
 		if (meter == null || typeof meter.report !== 'function') return;
-		meter.report({
+		const report = {
 			packageId,
 			durationMs: Date.now() - startedAtMs,
 			outcome,
-		});
+		};
+		if (
+			typeof fallbackPackageId === 'string' &&
+			fallbackPackageId &&
+			fallbackPackageId !== packageId
+		) {
+			report.fallbackPackageId = fallbackPackageId;
+		}
+		if (outcome === 'error' && typeof errorName === 'string' && errorName) {
+			report.errorName = errorName;
+		}
+		meter.report(report);
 	} catch {}
 }
 
@@ -588,9 +652,12 @@ function __kodyRecordStaticPackageCall(packageId, startedAtMs, outcome) {
 // event per call. [[Call]] records usage. [[Construct]] is not metered
 // (construction stays a transparent \`new\`), but it still runs under the
 // stamp ALS so constructor-side fetch / kody.* keep the imported identity.
+// Re-export chains that wrap an already-metered proxy record once at the
+// innermost layer (see __kodyMeteredStaticPackageExports), with the
+// outermost import id as fallbackPackageId for older artifact grants.
 export function __kodyMeterStaticPackageExport(packageId, exportValue) {
 	if (typeof exportValue !== 'function') return exportValue;
-	return new Proxy(exportValue, {
+	const proxy = new Proxy(exportValue, {
 		construct(target, argumentsList, newTarget) {
 			return __kodyRunWithSecretAuthority(packageId, () =>
 				Reflect.construct(target, argumentsList, newTarget),
@@ -598,6 +665,28 @@ export function __kodyMeterStaticPackageExport(packageId, exportValue) {
 		},
 		apply(target, thisArg, argumentsList) {
 			const startedAtMs = Date.now();
+			// Outer re-export layers skip recording; the inner metered apply
+			// that reaches the real target owns the event.
+			const targetIsMetered = __kodyMeteredStaticPackageExports.has(target);
+			const parentChain = __kodyStaticCallChainAls.getStore();
+			const outerPackageId = parentChain?.outerPackageId ?? packageId;
+			const recordOutcome = (outcome, errorName) => {
+				if (targetIsMetered) return;
+				__kodyRecordStaticPackageCall(
+					packageId,
+					startedAtMs,
+					outcome,
+					errorName,
+					outerPackageId,
+				);
+			};
+			// Propagate the outer id only across a metered→metered hop
+			// (re-export). Innermost clears the store so independent calls
+			// from the real target body do not inherit a fallback id.
+			const runWithCallChain = (callback) =>
+				targetIsMetered
+					? __kodyStaticCallChainAls.run({ outerPackageId }, callback)
+					: __kodyStaticCallChainAls.run(null, callback);
 			// Async callees must be awaited inside ALS.run so the stamp
 			// survives awaits in the callee body (workerd loses ALS when the
 			// sync run() callback only *returns* a Promise). Sync callees
@@ -605,68 +694,56 @@ export function __kodyMeterStaticPackageExport(packageId, exportValue) {
 			// sync returns and run Reflect.apply inside async ALS, so we key
 			// off the intrinsic AsyncFunction prototype (not constructor.name).
 			if (Object.getPrototypeOf(target) === __kodyAsyncFunctionPrototype) {
-				return __kodyRunWithSecretAuthority(packageId, async () => {
+				return __kodyRunWithSecretAuthority(packageId, async () =>
+					runWithCallChain(async () => {
+						try {
+							const value = await Reflect.apply(
+								target,
+								thisArg,
+								argumentsList,
+							);
+							recordOutcome('success');
+							return value;
+						} catch (error) {
+							recordOutcome('error', __kodyStaticCallErrorName(error));
+							throw error;
+						}
+					}),
+				);
+			}
+			const invoke = () =>
+				runWithCallChain(() => {
+					let result;
 					try {
-						const value = await Reflect.apply(
-							target,
-							thisArg,
-							argumentsList,
-						);
-						__kodyRecordStaticPackageCall(
-							packageId,
-							startedAtMs,
-							'success',
-						);
-						return value;
+						result = Reflect.apply(target, thisArg, argumentsList);
 					} catch (error) {
-						__kodyRecordStaticPackageCall(
-							packageId,
-							startedAtMs,
-							'error',
-						);
+						recordOutcome('error', __kodyStaticCallErrorName(error));
 						throw error;
 					}
-				});
-			}
-			const invoke = () => {
-				let result;
-				try {
-					result = Reflect.apply(target, thisArg, argumentsList);
-				} catch (error) {
-					__kodyRecordStaticPackageCall(packageId, startedAtMs, 'error');
-					throw error;
-				}
-				// Deliberately only native promises: subscribing to an arbitrary
-				// user thenable would invoke its then() from the metering path,
-				// which can trigger lazy side effects (query-builder style
-				// thenables execute when first awaited) — a behavior change the
-				// wrapper must never cause. All modules run in one isolate, so
-				// async exports always return same-realm native promises;
-				// non-promise thenables record at return time instead of
-				// settlement.
-				if (result instanceof Promise) {
-					result.then(
-						() =>
-							__kodyRecordStaticPackageCall(
-								packageId,
-								startedAtMs,
-								'success',
-							),
-						() =>
-							__kodyRecordStaticPackageCall(
-								packageId,
-								startedAtMs,
-								'error',
-							),
-					);
+					// Deliberately only native promises: subscribing to an arbitrary
+					// user thenable would invoke its then() from the metering path,
+					// which can trigger lazy side effects (query-builder style
+					// thenables execute when first awaited) — a behavior change the
+					// wrapper must never cause. All modules run in one isolate, so
+					// async exports always return same-realm native promises;
+					// non-promise thenables record at return time instead of
+					// settlement.
+					if (result instanceof Promise) {
+						result.then(
+							() => recordOutcome('success'),
+							(error) =>
+								recordOutcome('error', __kodyStaticCallErrorName(error)),
+						);
+						return result;
+					}
+					recordOutcome('success');
 					return result;
-				}
-				__kodyRecordStaticPackageCall(packageId, startedAtMs, 'success');
-				return result;
-			};
+				});
 			return __kodyRunWithSecretAuthority(packageId, invoke);
 		},
 	});
+	__kodyMeteredStaticPackageExports.add(proxy);
+	return proxy;
 }
 
 // Unstamped fallback: modules without bundler-recorded package provenance
