@@ -12,6 +12,8 @@ import {
 	parseSecretScopeUnavailableMessage,
 } from './errors.ts'
 import {
+	disconnectSecret,
+	findStoredCredentialForUse,
 	listPackageSecretsByPackageIds,
 	listSecrets,
 	listUserSecretsForSearch,
@@ -571,4 +573,125 @@ test('scope move can preserve anywhere placement; brand-new Keys stay headers-on
 	await expect(
 		resolveSecret({ env, userId, name: 'brandNew', scope: 'user' }),
 	).resolves.toMatchObject({ found: true, placement: { headers: true } })
+})
+
+test('disconnect clears the value; reconnect preserves placement over a later default', async () => {
+	const { env } = await createSecretEnv()
+	await saveSecret({
+		env,
+		userId,
+		scope: 'user',
+		name: 'keptPlacement',
+		value: 'secret-value',
+		placementOnInsert: { headers: true, body: true },
+	})
+	await expect(
+		resolveSecret({ env, userId, name: 'keptPlacement', scope: 'user' }),
+	).resolves.toMatchObject({
+		found: true,
+		value: 'secret-value',
+		placement: { headers: true, body: true },
+	})
+	await expect(listSecrets({ env, userId, scope: 'user' })).resolves.toEqual([
+		expect.objectContaining({
+			name: 'keptPlacement',
+			disconnected: false,
+			placement: { headers: true, body: true },
+		}),
+	])
+
+	const beforeDisconnect = await resolveSecret({
+		env,
+		userId,
+		name: 'keptPlacement',
+		scope: 'user',
+	})
+	expect(beforeDisconnect.credentialId).toBeTruthy()
+	await expect(
+		disconnectSecret({ env, userId, name: 'keptPlacement', scope: 'user' }),
+	).resolves.toBe(true)
+	await expect(
+		resolveSecret({ env, userId, name: 'keptPlacement', scope: 'user' }),
+	).resolves.toMatchObject({ found: false })
+	await expect(
+		findStoredCredentialForUse({
+			env,
+			ownerId: userId,
+			credentialId: beforeDisconnect.credentialId!,
+		}),
+	).resolves.toBeNull()
+	await expect(listSecrets({ env, userId, scope: 'user' })).resolves.toEqual([
+		expect.objectContaining({
+			name: 'keptPlacement',
+			disconnected: true,
+			placement: { headers: true, body: true },
+		}),
+	])
+
+	await setSecretAllowedPackages({
+		env,
+		userId,
+		scope: 'user',
+		name: 'keptPlacement',
+		allowedPackages: ['package-1'],
+	})
+	await setSecretsAtomically({
+		env,
+		userId,
+		secrets: [
+			{ name: 'keptPlacement', value: 'batch-restored', scope: 'user' },
+		],
+		storageContext: { ...ctx('package-1'), storageId: null },
+	})
+	await expect(
+		resolveSecret({ env, userId, name: 'keptPlacement', scope: 'user' }),
+	).resolves.toMatchObject({
+		found: true,
+		value: 'batch-restored',
+		placement: { headers: true, body: true },
+	})
+	await expect(listSecrets({ env, userId, scope: 'user' })).resolves.toEqual([
+		expect.objectContaining({
+			name: 'keptPlacement',
+			disconnected: false,
+			placement: { headers: true, body: true },
+		}),
+	])
+
+	await saveSecret({
+		env,
+		userId,
+		scope: 'package',
+		name: 'pkgKept',
+		value: 'pkg-value',
+		storageContext: ctx('package-2'),
+		placementOnInsert: { headers: true, query: true },
+	})
+	await disconnectSecret({
+		env,
+		userId,
+		name: 'pkgKept',
+		scope: 'package',
+		storageContext: ctx('package-2'),
+	})
+	await expect(
+		listPackageSecretsByPackageIds({
+			env,
+			userId,
+			packageIds: ['package-2'],
+		}),
+	).resolves.toEqual(
+		new Map([
+			[
+				'package-2',
+				[
+					expect.objectContaining({
+						name: 'pkgKept',
+						disconnected: true,
+						placement: { headers: true, query: true },
+					}),
+				],
+			],
+		]),
+	)
 })

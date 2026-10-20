@@ -290,6 +290,7 @@ const apiKeySecret: ListedSecret = {
 	expiresAt: null,
 	ttlMs: 60,
 	placement: null,
+	disconnected: false,
 }
 
 function stubEnv(stamps?: Parameters<typeof createStubDb>[0]) {
@@ -402,6 +403,16 @@ test('waiting first-use signals emit cards only when the probe knows they are mi
 	expect(buildWaitingItems(discordOpen, 'ada').map((item) => item.id)).toEqual([
 		'first-use:discord',
 	])
+
+	mockFirstUseProbesPresent(true)
+	mockModule.listSecrets.mockResolvedValueOnce([
+		{ ...apiKeySecret, disconnected: true },
+	])
+	const disconnectedOnly = await collectWaitingSignals({
+		env: stubEnv(allStamped),
+		user,
+	})
+	expect(disconnectedOnly.firstUseMissing).toEqual(['secret'])
 })
 
 test('waiting onboarding checklist reuses first-use probes and falls back to its own package count when the probe fails', async () => {
