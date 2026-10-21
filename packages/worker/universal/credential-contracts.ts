@@ -115,13 +115,15 @@ export type EffectiveCredentialMappingStatus =
 	| 'unbound'
 	| 'ambiguous'
 	| 'unusable'
+	/** Bound to a Key whose expiry has passed; not missing, not fillable. */
+	| 'expired'
 
 export type EffectiveCredentialMapping = {
 	source: CredentialMappingSource
 	status: EffectiveCredentialMappingStatus
 	credentials: Array<CredentialRef>
 	candidates: Array<CredentialRef>
-	/** Absolute creation link; set when status is not `ready`. */
+	/** Absolute creation link; set when status is neither `ready` nor `expired`. */
 	createUrl: string | null
 }
 

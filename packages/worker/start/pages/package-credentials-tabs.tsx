@@ -158,6 +158,18 @@ export function renderEffective(
 	switch (mapping.status) {
 		case 'ready':
 			return renderRefs(orgSlug, mapping.credentials)
+		case 'expired':
+			if (mapping.credentials.length > 0) {
+				return renderRefs(orgSlug, mapping.credentials)
+			}
+			if (mapping.candidates.length > 0) {
+				return (
+					<span>
+						Expired; one of: {renderRefs(orgSlug, mapping.candidates)}
+					</span>
+				)
+			}
+			return <span css={mutedCss}>Expired</span>
 		case 'none':
 			return <span css={mutedCss}>Nothing, on purpose</span>
 		case 'unbound':
