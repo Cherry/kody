@@ -227,11 +227,19 @@ export async function openBrowseSession(
 					})
 				: null
 		await page.goto(url, { waitUntil: 'domcontentloaded' })
-		const finalUrl = page.url()
-		assertBrowseLandedOnTarget({ requestedUrl: url, finalUrl })
+		assertBrowseLandedOnTarget({
+			requestedUrl: url,
+			finalUrl: page.url(),
+		})
 		if (screenshotPath) {
 			await page.waitForLoadState('load', {
 				timeout: browseScreenshotLoadTimeoutMs,
+			})
+			// Re-check after the load wait: client navigations (login, cross-origin)
+			// can land after domcontentloaded and before capture.
+			assertBrowseLandedOnTarget({
+				requestedUrl: url,
+				finalUrl: page.url(),
 			})
 			await page.screenshot({
 				path: screenshotPath,
@@ -240,21 +248,29 @@ export async function openBrowseSession(
 			})
 		}
 
-		const report: BrowseSessionReport = {
-			ok: true,
-			origin,
-			path: browsePath,
-			url: finalUrl,
-			headed,
-			record,
-			videoDir,
-			screenshotPath,
-			detail: `opened ${finalUrl} (signed in)`,
+		const buildSignedInReport = () => {
+			const finalUrl = page.url()
+			assertBrowseLandedOnTarget({ requestedUrl: url, finalUrl })
+			return {
+				ok: true as const,
+				origin,
+				path: browsePath,
+				url: finalUrl,
+				headed,
+				record,
+				videoDir,
+				screenshotPath,
+				detail: `opened ${finalUrl} (signed in)`,
+			} satisfies BrowseSessionReport
 		}
+
+		let report = buildSignedInReport()
 
 		if (closeAfterMs != null) {
 			if (closeAfterMs > 0) {
 				await delay(closeAfterMs)
+				// Session may navigate during the hold (login, cross-origin).
+				report = buildSignedInReport()
 			}
 			await context.close()
 			context = null
