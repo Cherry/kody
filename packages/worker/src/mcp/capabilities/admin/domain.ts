@@ -75,6 +75,7 @@ import { adminCredentialBackfillCapability } from './admin-credential-backfill.t
 import { adminCredentialStampBackfillCapability } from './admin-credential-stamp-backfill.ts'
 import { adminCredentialStampMigrateCapability } from './admin-credential-stamp-migrate.ts'
 import { adminJobOwnerEnablementBackfillCapability } from './admin-job-owner-enablement-backfill.ts'
+import { adminJobCallerContextPackageIdBackfillCapability } from './admin-job-caller-context-package-id-backfill.ts'
 import { adminMemoryPersonalizeCopyCapability } from './admin-memory-personalize-copy.ts'
 import { adminMemoryPersonalizePurgeCapability } from './admin-memory-personalize-purge.ts'
 
@@ -133,6 +134,7 @@ export const adminDomain = defineDomain({
 		'credential inventory',
 		'credential backfill',
 		'job owner enablement backfill',
+		'job caller context package id backfill',
 		'cron enablement backfill',
 		'memory personalize',
 		'memory copy',
@@ -190,6 +192,7 @@ export const adminDomain = defineDomain({
 		adminCredentialStampBackfillCapability,
 		adminCredentialStampMigrateCapability,
 		adminJobOwnerEnablementBackfillCapability,
+		adminJobCallerContextPackageIdBackfillCapability,
 		adminMemoryPersonalizeCopyCapability,
 		adminMemoryPersonalizePurgeCapability,
 		adminAuditLogQueryCapability,
