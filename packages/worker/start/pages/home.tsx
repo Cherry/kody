@@ -134,7 +134,7 @@ export function HomeRoute({
 					{landingHeroPlugLine}
 				</p>
 				<div className="landing-compare">
-					<div className="landing-compare-col">
+					<div className="landing-compare-col landing-compare-col-without">
 						<h3 id="compare-without-title" className="landing-compare-title">
 							{landingCompareWithoutTitle}
 						</h3>
@@ -143,9 +143,25 @@ export function HomeRoute({
 							className="landing-compare-list"
 						>
 							{landingCompareWithoutItems.map((item) => (
-								<li key={item}>{item}</li>
+								<li key={item} className="landing-compare-item">
+									<span className="landing-compare-mark" aria-hidden="true">
+										<svg viewBox="0 0 16 16">
+											<path d="M5 5l6 6M11 5l-6 6" />
+										</svg>
+									</span>
+									{item}
+								</li>
 							))}
 						</ul>
+					</div>
+					<div className="landing-compare-arrows" aria-hidden="true">
+						{landingCompareWithoutItems.map((item) => (
+							<span key={item} className="landing-compare-arrow">
+								<svg viewBox="0 0 16 16">
+									<path d="M3 8h10M9 4l4 4-4 4" />
+								</svg>
+							</span>
+						))}
 					</div>
 					<div className="landing-compare-col landing-compare-col-with">
 						<h3 id="compare-with-title" className="landing-compare-title">
@@ -156,7 +172,14 @@ export function HomeRoute({
 							className="landing-compare-list"
 						>
 							{landingCompareWithItems.map((item) => (
-								<li key={item}>{item}</li>
+								<li key={item} className="landing-compare-item">
+									<span className="landing-compare-mark" aria-hidden="true">
+										<svg viewBox="0 0 16 16">
+											<path d="M3.5 8.5l3 3 6-7" />
+										</svg>
+									</span>
+									{item}
+								</li>
 							))}
 						</ul>
 					</div>
@@ -176,13 +199,27 @@ export function HomeRoute({
 				<ul className="landing-vs-list">
 					{landingIsNotItems.map((item) => (
 						<li key={item.kicker} className="landing-vs-item" ref={revealRef()}>
-							<p className="landing-vs-kicker">{item.kicker}</p>
-							<p className="landing-vs-body">{item.body}</p>
+							<span className="landing-vs-mark" aria-hidden="true">
+								<svg viewBox="0 0 16 16">
+									<path d="M5 5l6 6M11 5l-6 6" />
+								</svg>
+							</span>
+							<div>
+								<p className="landing-vs-kicker">{item.kicker}</p>
+								<p className="landing-vs-body">{item.body}</p>
+							</div>
 						</li>
 					))}
 					<li className="landing-vs-item landing-vs-item-is" ref={revealRef()}>
-						<p className="landing-vs-kicker">{landingIsItem.kicker}</p>
-						<p className="landing-vs-body">{landingIsItem.body}</p>
+						<span className="landing-vs-mark" aria-hidden="true">
+							<svg viewBox="0 0 16 16">
+								<path d="M3.5 8.5l3 3 6-7" />
+							</svg>
+						</span>
+						<div>
+							<p className="landing-vs-kicker">{landingIsItem.kicker}</p>
+							<p className="landing-vs-body">{landingIsItem.body}</p>
+						</div>
 					</li>
 				</ul>
 			</section>
