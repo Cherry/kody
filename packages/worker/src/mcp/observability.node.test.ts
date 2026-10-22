@@ -411,6 +411,13 @@ test('logMcpEvent keeps sandbox and caller failures off Sentry and still reports
 			'Error',
 			new Error('EISDIR: /session/src is a directory'),
 		),
+		// restoreFiles writes caller paths without DO EISDIR remap.
+		handlerFailure(
+			'repoRestore',
+			'repo',
+			'Error',
+			new Error('EISDIR: /session/src is a directory'),
+		),
 		// Malformed / non-applying patches (KODY-A3 / KODY-A4). Plain Error
 		// from DO RPC, including the legacy `git apply patch: …` wrap.
 		handlerFailure(
@@ -454,7 +461,7 @@ test('logMcpEvent keeps sandbox and caller failures off Sentry and still reports
 		for (const event of callerFailures) logMcpEvent(event)
 	})
 
-	expect(payloads).toHaveLength(37)
+	expect(payloads).toHaveLength(38)
 	expect(JSON.parse(payloads[0]!)).toMatchObject({
 		tool: 'execute',
 		outcome: 'failure',
@@ -529,9 +536,19 @@ test('logMcpEvent keeps sandbox and caller failures off Sentry and still reports
 				new Error('Saved package "demo" was not found.'),
 			),
 		)
+		// Raw EISDIR outside edit/patch capabilities is platform-visible
+		// (git/clone/publish/bundle paths must not be hidden from Sentry).
+		logMcpEvent(
+			handlerFailure(
+				'packagePublish',
+				'packages',
+				'Error',
+				new Error('EISDIR: /tmp/snapshot is a directory'),
+			),
+		)
 	})
 
-	expect(sentryMock.captureException).toHaveBeenCalledTimes(7)
+	expect(sentryMock.captureException).toHaveBeenCalledTimes(8)
 	expect(sentryMock.captureException).toHaveBeenNthCalledWith(
 		1,
 		expect.objectContaining({ message: 'platform handler blew up' }),
@@ -567,6 +584,12 @@ test('logMcpEvent keeps sandbox and caller failures off Sentry and still reports
 		7,
 		expect.objectContaining({
 			message: 'Saved package "demo" was not found.',
+		}),
+	)
+	expect(sentryMock.captureException).toHaveBeenNthCalledWith(
+		8,
+		expect.objectContaining({
+			message: 'EISDIR: /tmp/snapshot is a directory',
 		}),
 	)
 	expect(sentryMock.scope.setLevel).toHaveBeenCalledWith('error')
