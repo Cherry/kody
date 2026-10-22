@@ -1,3 +1,8 @@
+import {
+	isUnrepairablePreBindingArtifact,
+	publishedArtifactNeedsPackageBindingRebuild,
+} from './pre-binding-artifact-repair.ts'
+import { type PublishedBundleArtifact } from './published-runtime-artifacts.ts'
 import { type McpCallerContext } from '@kody-internal/shared/chat.ts'
 import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import { type RuntimePackageAppVisitor } from '@kody-internal/shared/runtime-worker.ts'
@@ -2419,22 +2424,49 @@ async function resolvePackageAppBundledArtifact(input: {
 		artifactName: null,
 		entryPoint: appEntry,
 	})
-	if (
+	const currentArtifact =
 		loadedArtifact?.artifact &&
 		isPublishedBundleArtifactCurrentForCommit({
 			artifact: loadedArtifact.artifact,
 			rowPublishedCommit: loadedArtifact.row?.publishedCommit,
 			currentPublishedCommit: input.savedPackage.publishedCommit,
 		})
-	) {
-		return {
-			mainModule: loadedArtifact.artifact.mainModule,
-			modules: loadedArtifact.artifact.modules,
-			dependencies: loadedArtifact.artifact.dependencies,
-			dynamicDependencies: loadedArtifact.artifact.dynamicDependencies,
-		}
+			? loadedArtifact.artifact
+			: null
+	const servePublishedArtifact = (artifact: PublishedBundleArtifact) => ({
+		mainModule: artifact.mainModule,
+		modules: artifact.modules,
+		dependencies: artifact.dependencies,
+		dynamicDependencies: artifact.dynamicDependencies,
+	})
+	// A pre-fix bundle that inlines other packages may need one rebuild so
+	// each package's fetch acts as that package (GHSA-5fv3-qv7j-rqf5).
+	if (currentArtifact && !isUnrepairablePreBindingArtifact(currentArtifact)) {
+		return servePublishedArtifact(currentArtifact)
+	}
+	// Only a caller that passes no source at all keeps serving the published
+	// bundle (logged so the unbound bundle is visible). A source load that
+	// fails propagates instead of silently serving an unrepaired bundle.
+	if (currentArtifact && !input.sourceFiles && !input.loadSourceFiles) {
+		console.warn(
+			JSON.stringify({
+				event: 'pre_binding_bundle_served_without_source',
+				sourceId: input.savedPackage.sourceId,
+				surface: 'app',
+			}),
+		)
+		return servePublishedArtifact(currentArtifact)
 	}
 	const sourceFiles = await resolvePackageAppSourceFiles(input)
+	if (
+		currentArtifact &&
+		!publishedArtifactNeedsPackageBindingRebuild({
+			artifact: currentArtifact,
+			sourceFiles,
+		})
+	) {
+		return servePublishedArtifact(currentArtifact)
+	}
 	assertPublishedSourceCanRebuildWithoutInstallingDeps({
 		sourceFiles,
 		bundleLabel: `Saved package app "${input.savedPackage.kodyId}"`,
