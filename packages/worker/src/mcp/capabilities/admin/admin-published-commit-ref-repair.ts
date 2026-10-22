@@ -24,6 +24,7 @@ const outcomeSchema = z.object({
 		'unrecoverable',
 		'repaired',
 		'skipped_unpublished',
+		'skipped_owner_deleting',
 		'failed',
 	]),
 	defaultBranch: z.string().optional(),
@@ -74,6 +75,13 @@ const outputSchema = z.object({
 	repaired: z.number().int().nonnegative(),
 	failed: z.number().int().nonnegative(),
 	skippedUnpublished: z.number().int().nonnegative(),
+	skippedOwnerDeleting: z
+		.number()
+		.int()
+		.nonnegative()
+		.describe(
+			'Packages skipped because their owner is mid-deletion or deleted.',
+		),
 	nextCursor: z
 		.string()
 		.nullable()
