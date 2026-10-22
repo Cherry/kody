@@ -49,9 +49,11 @@ export function FeaturesOverview() {
 						<div className="pitch">
 							<div className="feature-name">
 								<img
-									src={publicAsset(card.orb)}
-									width="38"
-									height="38"
+									src={publicAsset(
+										`/images/features/${card.id === 'integrations' ? 'credentials' : card.id}.svg`,
+									)}
+									width="44"
+									height="44"
 									alt=""
 								/>
 								<h2>{card.name}</h2>
