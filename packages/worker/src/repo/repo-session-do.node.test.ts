@@ -1923,14 +1923,13 @@ test('confirmed destructive overwrite replaces history with an orphan root commi
 			},
 		),
 	)
-	mockModule.listArtifactServerRefs.mockResolvedValue([
-		{ ref: 'refs/heads/sessions/sourcesync-canary', oid: priorCanaryCommit },
-		{
-			ref: 'refs/heads/sessions/sourcesync-stale-prior',
-			oid: priorCanaryCommit,
-		},
-		{ ref: 'refs/heads/main', oid: priorCanaryCommit },
-	])
+	for (const ref of [
+		'refs/heads/sessions/sourcesync-canary',
+		'refs/heads/sessions/sourcesync-stale-prior',
+		'refs/heads/main',
+	]) {
+		mockModule.gitState.remoteRefs.set(ref, priorCanaryCommit)
+	}
 
 	const result = await publish({ destructiveOverwriteConfirmed: true })
 
