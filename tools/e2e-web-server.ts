@@ -112,6 +112,14 @@ async function startE2eWebServer() {
 		throw new Error(staleOrigin)
 	}
 
+	// Pin before prepare/migrate so standalone `e2e:web-server` matches
+	// Playwright's webServer.env. migrate:e2e must use wrangler env=test D1
+	// names (not production defaults) so Vite's later env=test origin opens
+	// the same migrated databases.
+	process.env.CLOUDFLARE_ENV = 'test'
+	process.env.SENTRY_DSN = ''
+	process.env.SENTRY_ENVIRONMENT = 'test'
+
 	runSetup(process.execPath, ['tools/prepare-e2e-env.ts'])
 	runSetup(resolveNpmCommand(), ['run', 'migrate:e2e'])
 
@@ -156,6 +164,13 @@ async function startE2eWebServer() {
 		WRANGLER_PERSIST_TO: '.wrangler/state/e2e',
 		X_LOCAL_EXPLORER: 'false',
 		KODY_E2E_WEB_SERVER: '1',
+		// Select wrangler env=test (loads .dev.vars.test, not .env) even when
+		// this script is started without Playwright's webServer.env.
+		CLOUDFLARE_ENV: 'test',
+		// Node --env-file does not override existing keys: clear any real DSN
+		// inherited from the parent shell before Vite/wrangler start.
+		SENTRY_DSN: '',
+		SENTRY_ENVIRONMENT: 'test',
 	}
 
 	function spawnVite() {
