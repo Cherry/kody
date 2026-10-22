@@ -179,16 +179,15 @@ test('dispatcher restores grant set after ALS gap so secret-free package stamp r
 	// Create dispatchers with grants captured from props — no ambient ALS.
 	// Use a simple tool name so sanitizeToolName is a no-op (MCP capability
 	// names like mcp:notion:… sanitize; this test targets grant restore).
+	const lockedMcpProvider = {
+		name: 'kody',
+		fns: {
+			invokeLockedMcp: async (args: unknown) =>
+				capability!.handler((args ?? {}) as Record<string, unknown>, ctx),
+		},
+	}
 	const dispatchers = createToolDispatchers(
-		[
-			{
-				name: 'kody',
-				fns: {
-					invokeLockedMcp: async (args: unknown) =>
-						capability!.handler((args ?? {}) as Record<string, unknown>, ctx),
-				},
-			},
-		],
+		[lockedMcpProvider],
 		{ active: true },
 		undefined,
 		undefined,
@@ -196,16 +195,21 @@ test('dispatcher restores grant set after ALS gap so secret-free package stamp r
 	)
 	const kodyDispatcher = dispatchers.kody
 	if (!kodyDispatcher) throw new Error('Expected kody dispatcher')
+	// GHSA-5fv3: the package's identity comes from its trusted per-package
+	// binding (host-side), not a field the sandbox puts in the args.
+	const boundDispatcher = createToolDispatchers(
+		[lockedMcpProvider],
+		{ active: true },
+		undefined,
+		undefined,
+		granted,
+		{ boundPackageId: approvedPackageId },
+	).kody
+	if (!boundDispatcher) throw new Error('Expected bound kody dispatcher')
 
 	// Call outside any secret-authority ALS (simulates Workers RPC boundary).
 	const stamped = await parseCall(
-		kodyDispatcher.call(
-			'invokeLockedMcp',
-			JSON.stringify({
-				query: 'docs',
-				[secretAuthorityArgName]: approvedPackageId,
-			}),
-		),
+		boundDispatcher.call('invokeLockedMcp', JSON.stringify({ query: 'docs' })),
 	)
 	expect(stamped.error).toBeUndefined()
 	expect(mocks.assertCanUseMcpServer).toHaveBeenLastCalledWith(
@@ -225,21 +229,23 @@ test('dispatcher restores grant set after ALS gap so secret-free package stamp r
 		}),
 	)
 
-	// Forged stamp outside the grant set fails closed (null authority).
-	mocks.assertCanUseMcpServer.mockClear()
-	await parseCall(
-		kodyDispatcher.call(
-			'invokeLockedMcp',
-			JSON.stringify({
-				[secretAuthorityArgName]: 'pkg-forged',
+	// A forged authority field is ignored, even naming a granted package.
+	for (const forgedId of ['pkg-forged', approvedPackageId]) {
+		mocks.assertCanUseMcpServer.mockClear()
+		await parseCall(
+			kodyDispatcher.call(
+				'invokeLockedMcp',
+				JSON.stringify({
+					[secretAuthorityArgName]: forgedId,
+				}),
+			),
+		)
+		expect(mocks.assertCanUseMcpServer).toHaveBeenLastCalledWith(
+			expect.objectContaining({
+				packageId: null,
 			}),
-		),
-	)
-	expect(mocks.assertCanUseMcpServer).toHaveBeenLastCalledWith(
-		expect.objectContaining({
-			packageId: null,
-		}),
-	)
+		)
+	}
 
 	// Without captured grants, peeled stamp alone reinstalls an empty set and
 	// fails closed — the pre-fix production failure mode.

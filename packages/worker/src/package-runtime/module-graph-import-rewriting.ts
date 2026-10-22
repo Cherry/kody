@@ -1,3 +1,4 @@
+import { collectTopLevelFetchCollisionNames } from './rewrite-local-execute-secret-fetch.ts'
 import {
 	loadPackageSourceBySourceId,
 	type LoadedPackageSource,
@@ -479,12 +480,28 @@ async function rewriteKodyImports(input: {
 	 */
 	sourcePackageId: string | null
 }) {
+	// Stamped package modules get a lexical, module-bound `fetch` so outbound
+	// calls carry their own identity (GHSA-5fv3). Callbacks/getters from other
+	// modules keep their own binding.
+	let boundFetchPrefix = ''
+	if (input.sourcePackageId && /\bfetch\b/.test(input.source)) {
+		const collisions = collectTopLevelFetchCollisionNames(input.source)
+		if (collisions && !collisions.has('fetch')) {
+			const facadePath = ensurePackageRuntimeModule(
+				input.state,
+				input.sourcePackageId,
+			)
+			boundFetchPrefix = `import { __kodyBoundFetch as fetch } from ${JSON.stringify(
+				createRelativeImportSpecifier(input.modulePath, facadePath),
+			)};\n`
+		}
+	}
 	const {
 		literalImports: importNodes,
 		dynamicImportExpressions: dynamicImportNodes,
 	} = collectModuleImportNodesCached(input.state.importNodesCache, input.source)
 	if (importNodes.length === 0 && dynamicImportNodes.length === 0) {
-		return input.source
+		return boundFetchPrefix + input.source
 	}
 	const replacements: Array<RewriteReplacement> = []
 	for (const node of importNodes) {
@@ -566,7 +583,10 @@ async function rewriteKodyImports(input: {
 				})
 			: '',
 	].filter(Boolean)
-	return helpers.length > 0 ? `${helpers.join('\n')}\n${rewritten}` : rewritten
+	return (
+		boundFetchPrefix +
+		(helpers.length > 0 ? `${helpers.join('\n')}\n${rewritten}` : rewritten)
+	)
 }
 
 export type PreparedKodyGraph = {

@@ -1,3 +1,8 @@
+import {
+	createPackageSecretRefKey,
+	issuePackageSecretRef,
+} from '#mcp/secrets/package-secret-ref.ts'
+import { buildSecretPlaceholder } from '#mcp/secrets/placeholders.ts'
 import { getErrorMessage } from '@kody-internal/shared/error-message.ts'
 import { personalOrgId } from '@kody-internal/shared/owner-person-ids.ts'
 import { isRecord } from '@kody-internal/shared/is-record.ts'
@@ -68,6 +73,7 @@ import {
 	type PackageWorkflowTools,
 } from '#mcp/runtime-helper-manifest.ts'
 import { newRunCredentialClientBinding } from '#worker/credentials/credential-client-handle.ts'
+import { resolveCallerCredentialPackageId } from '#mcp/credential-client-tools.ts'
 import {
 	type CredentialCallMap,
 	type RunCredentialCallMap,
@@ -109,6 +115,7 @@ import {
 } from '#worker/run-records/types.ts'
 import { shouldRecordExecuteUsageForRun } from '#worker/usage/execute-usage-surface.ts'
 import { createDynamicCallableWorkflow } from '#worker/package-runtime/package-workflows.ts'
+import { findKodyRuntimeModulePath } from '#worker/package-runtime/runtime-source-modules.ts'
 import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { requestLineage } from '#worker/request-context/request-context.ts'
 import {
@@ -288,6 +295,8 @@ function createPackageSecretTools(input: {
 	callerContext: McpCallerContext
 	runPackageId: string | null
 	grantedPackageIds: ReadonlySet<string>
+	/** Per-run key; when set, package-scoped get() returns an issued ref placeholder. */
+	packageSecretRefKey?: string | null
 }): PackageSecretToolOptions {
 	const resolveAuthorityPackageId = (requestedPackageId?: string | null) => {
 		// Stamp identity only. The executor peels the hidden capability field
@@ -323,6 +332,7 @@ function createPackageSecretTools(input: {
 				resolveAuthorityPackageId(requestedPackageId),
 			),
 			baseUrl: input.callerContext.baseUrl,
+			runContextPackageId: input.runPackageId,
 			credential: {
 				use: 'package-secret-mount',
 				alias,
@@ -332,8 +342,26 @@ function createPackageSecretTools(input: {
 		})
 	return {
 		runPackageId: input.runPackageId,
-		get: async (alias: string, requestedPackageId?: string | null) =>
-			(await resolveMount(alias, requestedPackageId)).ref,
+		get: async (alias: string, requestedPackageId?: string | null) => {
+			const resolved = await resolveMount(alias, requestedPackageId)
+			if (
+				resolved.scope === 'package' &&
+				input.packageSecretRefKey &&
+				resolved.packageId
+			) {
+				const issued = await issuePackageSecretRef({
+					refKey: input.packageSecretRefKey,
+					packageId: resolved.packageId,
+					alias: resolved.alias ?? alias,
+				})
+				return buildSecretPlaceholder({
+					name: resolved.name,
+					scope: 'package',
+					ref: issued,
+				})
+			}
+			return resolved.ref
+		},
 		has: async (alias: string, requestedPackageId?: string | null) => {
 			try {
 				await resolveMount(alias, requestedPackageId, 'presence')
@@ -1309,13 +1337,16 @@ export async function runBundledModuleWithRegistry(
 			callerContext.user?.userId && !closedWorldRetrieverRuntime
 				? {
 						binding: credentialClientBinding,
-						// A claimed id selects which package's needs apply; only a
-						// package in this run's provenance may be claimed.
+						// The calling package decides whose needs, mappings, and bound
+						// Keys apply (GHSA-5fv3): the bound dispatcher's stamp, or the
+						// run package for unbound calls. Naming another id is denied.
 						resolvePackageId: async (requested) =>
-							typeof requested === 'string' &&
-							grantedPackageStorageIds.has(requested)
-								? requested
-								: (options?.packageContext?.packageId ?? null),
+							resolveCallerCredentialPackageId({
+								requested,
+								callerPackageId:
+									getSecretAuthorityScope()?.currentPackageId?.trim() ||
+									(options?.packageContext?.packageId ?? null),
+							}),
 						callMap: callMap?.map ?? null,
 						runNeeds: () => {
 							const request = callerContext.request
@@ -1330,6 +1361,7 @@ export async function runBundledModuleWithRegistry(
 						waitUntil: options?.waitUntil,
 					}
 				: undefined
+		const packageSecretRefKey = createPackageSecretRefKey()
 		const executor = createExecuteExecutor({
 			env,
 			exports: options?.executorExports ?? workerExports,
@@ -1340,8 +1372,18 @@ export async function runBundledModuleWithRegistry(
 				userId: ownerIdFromCaller(callerContext) || null,
 				email: callerContext.user?.email ?? null,
 				request: callerContext.request,
-				storageContext: normalizedStorageContext,
+				storageContext: {
+					sessionId: normalizedStorageContext?.sessionId ?? null,
+					appId: normalizedStorageContext?.appId ?? null,
+					// Run package id for the nested personal-secret rule (GHSA-5fv3).
+					packageId:
+						options?.packageContext?.packageId ??
+						normalizedStorageContext?.packageId ??
+						null,
+					storageId: normalizedStorageContext?.storageId ?? null,
+				},
 				grantedSecretAuthorityPackageIds: [...grantedPackageStorageIds],
+				packageSecretRefKey,
 				credentialClientBinding: credentialClientTools
 					? credentialClientBinding
 					: null,
@@ -1420,10 +1462,12 @@ export async function runBundledModuleWithRegistry(
 			? {
 					grantedPackageIds: grantedPackageStorageIds,
 					writable: !closedWorldRetrieverRuntime,
+					runPackageId: options?.packageContext?.packageId ?? null,
 				}
 			: undefined
 		const packageSecretTools = callerContext.user?.userId
 			? createPackageSecretTools({
+					packageSecretRefKey,
 					env,
 					callerContext,
 					runPackageId: options?.packageContext?.packageId ?? null,
@@ -1481,6 +1525,7 @@ export async function runBundledModuleWithRegistry(
 			createUnboundOptionalRuntimeHelperNames(runtimeHelperContext)
 		const runtimeHelperRuntimePropertySource =
 			createRuntimeHelperRuntimePropertySource()
+		const bundleRuntimeModulePath = findKodyRuntimeModulePath(hydratedModules)
 		const wrapped = `async (__invocation = {}) => {
   const __kodyTrustedPackageContext = (() => {
     const incoming = __invocation.packageContext;
@@ -1511,13 +1556,34 @@ ${runtimeHelperRuntimePropertySource}
     packageContext: __kodyTrustedPackageContext,
   };
   try {
-    return await __kodyRuntimeStorage.run(__kodyRuntime, async () => {
-      const __kodyModule = await import(${JSON.stringify(`./${bundle.mainModule}`)});
-      const __kodyEntrypoint = __kodyModule?.default;
-      if (typeof __kodyEntrypoint !== 'function') {
-        throw new Error('Kody execute modules must default export a function.');
+    // Seal dispatcher-backed store members and evaluate the shared runtime
+    // before any package/user module so captured intrinsics and the sealed
+    // authority getter are genuine (GHSA-5fv3).
+    for (const __kodySealedKey of ['kody', '__kodyPackageSecrets']) {
+      if (__kodySealedKey in __kodyRuntime) {
+        Object.defineProperty(__kodyRuntime, __kodySealedKey, { writable: false, configurable: false });
       }
-      return await __kodyEntrypoint(__invocation.params);
+    }
+    return await __kodyRuntimeStorage.run(__kodyRuntime, async () => {
+      const __kodyRuntimeModule = ${bundleRuntimeModulePath ? `await import(${JSON.stringify(`./${bundleRuntimeModulePath}`)})` : 'null'};
+      const __kodyRunEntrypoint = async () => {
+        const __kodyModule = await import(${JSON.stringify(`./${bundle.mainModule}`)});
+        const __kodyEntrypoint = __kodyModule?.default;
+        if (typeof __kodyEntrypoint !== 'function') {
+          throw new Error('Kody execute modules must default export a function.');
+        }
+        return await __kodyEntrypoint(__invocation.params);
+      };
+      // Install the trusted per-package bindings (GHSA-5fv3) in the runtime
+      // module's private scope. Only this host wrapper holds them.
+      return typeof __kodyPackageBindings !== 'undefined' &&
+        __kodyPackageBindings != null &&
+        typeof __kodyRuntimeModule?.__kodyRunWithPackageBindings === 'function'
+        ? await __kodyRuntimeModule.__kodyRunWithPackageBindings(
+            __kodyPackageBindings,
+            __kodyRunEntrypoint,
+          )
+        : await __kodyRunEntrypoint();
     });
   } finally {
     // Deliver buffered static package export call usage events while the

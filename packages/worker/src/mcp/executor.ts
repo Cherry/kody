@@ -83,6 +83,7 @@ import {
 	grantedSecretAuthorityPackageIdSet,
 	runWithCurrentSecretAuthority,
 	runWithSecretAuthorityScope,
+	secretAuthorityArgName,
 	secretAuthorityHeaderName,
 	takeSecretAuthorityFromCapabilityArgs,
 } from '#mcp/secrets/secret-authority.ts'
@@ -208,6 +209,13 @@ type DynamicWorkerExecutorInput = {
 	/** Mints this run's outbound fetch gateway; passed on each evaluate call. */
 	createRunFetcher?: () => Fetcher
 	/**
+	 * Mints the trusted per-package fetch binding for one package in the run's
+	 * grant set (GHSA-5fv3): a KodyFetchGateway whose host-set
+	 * `boundPackageId` prop is the package's secret identity. Omitted when
+	 * outbound fetch is disabled.
+	 */
+	createPackageFetcher?: (packageId: string) => Fetcher
+	/**
 	 * Builds the tail worker that records Cloudflare-measured CPU for this
 	 * isolate (`dynamic_worker_cpu`). Omitted when the loopback export is not
 	 * available; the run is unaffected either way.
@@ -289,6 +297,7 @@ type DynamicWorkerEntrypoint = {
 	evaluate(
 		dispatchers: Record<string, ToolDispatcher>,
 		invocation?: DynamicWorkerEvaluateInvocation,
+		packageBindings?: PackageBindingStubs | null,
 		runFetcher?: Fetcher | null,
 	): Promise<{
 		result: unknown
@@ -297,6 +306,18 @@ type DynamicWorkerEntrypoint = {
 		rawFetchHosts?: Array<string>
 	}>
 }
+
+/**
+ * Trusted per-package bindings handed to one `evaluate()` call (GHSA-5fv3).
+ * Keyed by saved-package id; each entry's identity lives in host-set props
+ * on its stubs, never in a value the sandbox can read or forge. Only the
+ * host-generated wrapper sees this object; it installs it in the runtime
+ * module's private binding scope for that package's module-bound helpers.
+ */
+export type PackageBindingStubs = Record<
+	string,
+	{ fetcher?: Fetcher | null; kody?: ToolDispatcher | null }
+>
 
 function cloneEvaluateJsonValue<T>(value: T): T {
 	if (value === undefined) return value
@@ -732,6 +753,14 @@ export function createExecuteExecutor(input: {
 		}),
 		createRunFetcher: () =>
 			loopbackExports.KodyFetchGateway({ props: gatewayProps }),
+		...(allowOutboundFetch
+			? {
+					createPackageFetcher: (packageId: string) =>
+						loopbackExports.KodyFetchGateway({
+							props: { ...gatewayProps, boundPackageId: packageId },
+						}),
+				}
+			: {}),
 		// Tails only run where Analytics Engine is bound (deployed Workers).
 		// Open-source workerd reports zero CPU, and a local tail would outlive
 		// the run with a D1 write per invocation.
@@ -882,10 +911,19 @@ function createStableDynamicWorkerExecutor(input: DynamicWorkerExecutorInput) {
 									sideEffects,
 									grantedSecretAuthorityPackageIds,
 								)
+								const packageBindings = createPackageBindingStubs({
+									grantedPackageIds: grantedSecretAuthorityPackageIds,
+									createPackageFetcher: input.createPackageFetcher,
+									providers,
+									executionState,
+									signal,
+									sideEffects,
+								})
 								const evaluate = () =>
 									entrypoint.evaluate(
 										dispatchers,
 										evaluateInvocation,
+										packageBindings,
 										input.createRunFetcher?.() ?? null,
 									)
 								return grantedSecretAuthorityPackageIds
@@ -1086,25 +1124,17 @@ function createSandboxRunFetchSource(allowOutboundFetch: boolean) {
 		]
 	}
 	return [
+		'    // Generic (unbound) fetch: never carries package secret authority.',
+		'    // Package identity travels only on the per-package gateway binding',
+		'    // used by module-bound fetch (GHSA-5fv3).',
 		'    const __kodyRunFetch = (input, init) => {',
-		"      // Capture stamp synchronously while the caller's ALS is still",
-		'      // active. Host `recordFetch` RPC awaits below; reading after',
-		'      // that await can lose ALS (ad-hoc execute has no run packageId',
-		'      // fallback).',
-		'      const __kodyGetSecretAuthority =',
-		'        globalThis[Symbol.for("kody.getSecretAuthority")];',
-		'      const __kodySecretAuthority =',
-		'        typeof __kodyGetSecretAuthority === "function"',
-		'          ? String(__kodyGetSecretAuthority() ?? "").trim()',
-		'          : "";',
 		'      try {',
 		'        let url = "";',
 		'        if (typeof input === "string") url = input;',
 		'        else if (input instanceof URL) url = input.toString();',
 		'        else if (input && typeof input.url === "string") url = input.url;',
 		'        const hostname = new URL(url).hostname.trim().toLowerCase();',
-		'        // Stamped package modules are already on the packages-first path.',
-		'        if (hostname && hostname !== __kodyExcludedFetchHost && !__kodySecretAuthority) {',
+		'        if (hostname && hostname !== __kodyExcludedFetchHost) {',
 		'          __kodyRawFetchHosts.push(hostname);',
 		'        }',
 		'      } catch {',
@@ -1123,9 +1153,6 @@ function createSandboxRunFetchSource(allowOutboundFetch: boolean) {
 		'              : undefined),',
 		'        );',
 		`        __kodyFetchHeaders.delete(${JSON.stringify(secretAuthorityHeaderName)});`,
-		'        if (__kodySecretAuthority) {',
-		`          __kodyFetchHeaders.set(${JSON.stringify(secretAuthorityHeaderName)}, __kodySecretAuthority);`,
-		'        }',
 		'        if (!__kodyRunFetcher) throw new Error("Outbound fetch is unavailable for this run.");',
 		'        const __kodyResponse = await __kodyRunFetcher.fetch(input, {',
 		'          ...init,',
@@ -1138,6 +1165,87 @@ function createSandboxRunFetchSource(allowOutboundFetch: boolean) {
 		'        return __kodyResponse;',
 		'      })();',
 		'    };',
+	]
+}
+
+/**
+ * Sandbox half of the trusted per-package binding (GHSA-5fv3). Wraps each
+ * host binding stub in a frozen record using intrinsics captured at module
+ * init, keyed by package id in a Map. The map is passed only to the
+ * runtime module's private binding scope by the host wrapper; package code
+ * never sees it and cannot name another package's entry.
+ */
+function createPackageBindingSandboxSource(allowOutboundFetch: boolean) {
+	return [
+		'function __kodyCreateSandboxPackageBindings(stubs, hostSideEffects, allowOutboundFetch, mcpFactoryRef) {',
+		'  const map = new __kodyMapCaptured();',
+		'  if (stubs == null || typeof stubs !== "object") return map;',
+		// Closed-world runs never emit the outbound path at all.
+		...(allowOutboundFetch
+			? [
+					'  const recordFetch = async () => {',
+					'    if (!hostSideEffects) return;',
+					'    const resJson = await hostSideEffects.call("recordFetch", "[]");',
+					'    const data = __kodyJsonParseCaptured(resJson);',
+					'    if (data.error) throw new __kodyErrorCaptured(data.error);',
+					'  };',
+				]
+			: []),
+		'  for (const packageId of __kodyObjectKeysCaptured(stubs)) {',
+		'    const stub = stubs[packageId];',
+		'    if (stub == null || typeof stub !== "object") continue;',
+		'    const fetcher = stub.fetcher ?? null;',
+		'    const kodyStub = stub.kody ?? null;',
+		'    const kodyCall = async (dispatchName, args) => {',
+		'      if (!kodyStub) {',
+		'        throw new __kodyErrorCaptured("kody:runtime is not available in this execution context.");',
+		'      }',
+		'      const payload = args == null || typeof args !== "object" || __kodyArrayIsArrayCaptured(args) ? (args ?? {}) : { ...args };',
+		`      if (payload && typeof payload === "object") delete payload[${JSON.stringify(secretAuthorityArgName)}];`,
+		'      const resJson = await kodyStub.call(dispatchName, __kodyJsonStringifyCaptured(payload));',
+		'      const data = __kodyJsonParseCaptured(resJson);',
+		'      if (data.error) throw new __kodyErrorCaptured(data.error);',
+		'      return data.result;',
+		'    };',
+		'    let mcp = null;',
+		'    const binding = __kodyObjectFreezeCaptured({',
+		'      kodyMcp: () => {',
+		'        if (mcp == null && typeof mcpFactoryRef?.create === "function") mcp = mcpFactoryRef.create(kodyCall);',
+		'        return mcp;',
+		'      },',
+		'      fetch: async (input, init) => {',
+		...(allowOutboundFetch
+			? [
+					'        if (!fetcher) {',
+					`          throw new __kodyErrorCaptured(${JSON.stringify(retrieverOutboundFetchDeniedMessage)});`,
+					'        }',
+					'        await recordFetch();',
+					'        return await fetcher.fetch(input, init);',
+				]
+			: [
+					`        throw new __kodyErrorCaptured(${JSON.stringify(retrieverOutboundFetchDeniedMessage)});`,
+				]),
+		'      },',
+		'      kodyCall: (dispatchName, args) => kodyCall(dispatchName, args),',
+		// packageStorage() for this package only: the host bound dispatcher
+		// stamps this package, so the bucket cannot be chosen by the caller.
+		'      packageStorageCall: async (toolName, args) => await kodyCall(toolName, args),',
+		// credential() for this package only: needs, mappings, and bound Keys
+		// resolve as the stamped package, never a sandbox-named id.
+		'      credentialCall: async (toolName, args) => await kodyCall(toolName, args),',
+		'      packageSecretGet: async (alias) => {',
+		'        const result = await kodyCall("packageSecretGet", { alias });',
+		'        return typeof result?.value === "string" ? result.value : "";',
+		'      },',
+		'      packageSecretHas: async (alias) => {',
+		'        const result = await kodyCall("packageSecretHas", { alias });',
+		'        return result?.has === true;',
+		'      },',
+		'    });',
+		'    __kodyReflectApplyCaptured(__kodyMapSetCaptured, map, [packageId, binding]);',
+		'  }',
+		'  return map;',
+		'}',
 	]
 }
 
@@ -1175,6 +1283,9 @@ function createExecutorModule(input: {
 	// this wrapper; their host prelude calls the dispatcher from the outer
 	// scope.
 	const oneFileHiddenBindings = [
+		'__kodyPackageBindings',
+		'__kodyPackageBindingStubs',
+		'__kodyPackageMcpFactoryRef',
 		kodyCallDispatcherName,
 		kodyProviderEvaluateBindingName,
 		'__kodyMcp',
@@ -1195,13 +1306,25 @@ function createExecutorModule(input: {
 		'const __kodyEvaluateFetchStorageSymbol = Symbol.for("kody.evaluateFetchStorage");',
 		'const __kodyEvaluateFetchPatchedSymbol = Symbol.for("kody.evaluateFetchPatched");',
 		'const __kodyRuntimeStorageSymbol = Symbol.for("kody.runtimeStorage");',
+		'// Capture before any package code can patch intrinsics (GHSA-5fv3).',
+		'const __kodyReflectApplyCaptured = Reflect.apply;',
+		'const __kodyAlsGetStoreCaptured = AsyncLocalStorage.prototype.getStore;',
+		'const __kodyObjectKeysCaptured = Object.keys;',
+		'const __kodyObjectFreezeCaptured = Object.freeze;',
+		'const __kodyMapCaptured = Map;',
+		'const __kodyMapSetCaptured = Map.prototype.set;',
+		'const __kodyJsonParseCaptured = JSON.parse;',
+		'const __kodyJsonStringifyCaptured = JSON.stringify;',
+		'const __kodyErrorCaptured = Error;',
+		'const __kodyArrayIsArrayCaptured = Array.isArray;',
+		...createPackageBindingSandboxSource(input.allowOutboundFetch !== false),
 		'const __kodyNativeFetch = globalThis.fetch.bind(globalThis);',
 		'const __kodyEvaluateFetchStorage =',
 		'  globalThis[__kodyEvaluateFetchStorageSymbol] ??',
 		'  (globalThis[__kodyEvaluateFetchStorageSymbol] = new AsyncLocalStorage());',
 		'if (!globalThis[__kodyEvaluateFetchPatchedSymbol]) {',
 		'  globalThis.fetch = (input, init) => {',
-		'    const ctx = __kodyEvaluateFetchStorage.getStore();',
+		'    const ctx = __kodyReflectApplyCaptured(__kodyAlsGetStoreCaptured, __kodyEvaluateFetchStorage, []);',
 		'    if (ctx) return ctx.fetch(input, init);',
 		'    return __kodyNativeFetch(input, init);',
 		'  };',
@@ -1209,11 +1332,13 @@ function createExecutorModule(input: {
 		'}',
 		'',
 		'export default class CodeExecutor extends WorkerEntrypoint {',
-		'  async evaluate(__dispatchers = {}, __invocation = {}, __kodyRunFetcher = null) {',
+		'  async evaluate(__dispatchers = {}, __invocation = {}, __kodyPackageBindingStubs = null, __kodyRunFetcher = null) {',
 		'    const __logs = [];',
 		'    const __kodyRawFetchHosts = [];',
 		`    const __kodyExcludedFetchHost = ${excludedHostname};`,
 		...createSandboxRunFetchSource(input.allowOutboundFetch !== false),
+		'    const __kodyPackageMcpFactoryRef = { create: null };',
+		`    const __kodyPackageBindings = __kodyCreateSandboxPackageBindings(__kodyPackageBindingStubs, __dispatchers.${hostSideEffectProviderName} ?? null, ${input.allowOutboundFetch !== false}, __kodyPackageMcpFactoryRef);`,
 		'    return __kodyEvaluateFetchStorage.run({ fetch: __kodyRunFetch }, async () => {',
 		'    const __kodyNativeConsole = globalThis.console;',
 		'    globalThis.console = {',
@@ -1229,6 +1354,20 @@ function createExecutorModule(input: {
 		// the dynamic worker source only names provider namespaces, while the
 		// actual per-invocation tool implementations arrive through RPC dispatchers.
 		...input.providers.map((provider) => createProviderProxySource(provider)),
+		// Package-bound kody.mcp (GHSA-5fv3): same MCP proxy, dispatched
+		// through that package's trusted binding so package-locked MCP
+		// servers see the package's own identity.
+		...(input.providers.some((provider) => provider.name === 'kody')
+			? [
+					'    __kodyPackageMcpFactoryRef.create = (callTool) => __kodyCreateRemoteProxy({',
+					'      entries: Array.isArray(__invocation.mcpServers) ? __invocation.mcpServers : [],',
+					'      entityLabel: "MCP server",',
+					'      shortEntityLabel: "MCP server",',
+					'      capabilityLabel: "MCP tool",',
+					'      callTool,',
+					'    });',
+				]
+			: []),
 		'',
 		'    let __timeoutId;',
 		'    try {',
@@ -1276,6 +1415,45 @@ function createProviderProxySource(provider: ResolvedProvider) {
 	return `    const ${provider.name} = new Proxy({}, {\n      get: (_, toolName) => async (...args) => {\n        const resJson = await __dispatchers.${provider.name}.call(String(toolName), JSON.stringify(args));\n        const data = JSON.parse(resJson);\n        if (data.error) throw new Error(data.error);\n        return data.result;\n      }\n    });`
 }
 
+/**
+ * One trusted binding per package in the run's grant set (GHSA-5fv3): a
+ * gateway fetcher and a `kody` capability dispatcher whose secret authority
+ * is fixed to that package on the host. Sandbox code never chooses the id.
+ */
+function createPackageBindingStubs(input: {
+	grantedPackageIds: ReadonlySet<string> | null
+	createPackageFetcher?: (packageId: string) => Fetcher
+	providers: Array<ResolvedProvider>
+	executionState: { active: boolean }
+	signal?: AbortSignal
+	sideEffects?: EvaluationSideEffectTracker
+}): PackageBindingStubs | null {
+	if (!input.grantedPackageIds || input.grantedPackageIds.size === 0) {
+		return null
+	}
+	const kodyProvider = input.providers.find(
+		(provider) => provider.name === 'kody',
+	)
+	const bindings: PackageBindingStubs = {}
+	for (const packageId of input.grantedPackageIds) {
+		const kody = kodyProvider
+			? createToolDispatchers(
+					[kodyProvider],
+					input.executionState,
+					input.signal,
+					input.sideEffects,
+					input.grantedPackageIds,
+					{ boundPackageId: packageId },
+				).kody
+			: null
+		bindings[packageId] = {
+			fetcher: input.createPackageFetcher?.(packageId) ?? null,
+			kody: kody ?? null,
+		}
+	}
+	return bindings
+}
+
 export function createToolDispatchers(
 	providers: Array<ResolvedProvider>,
 	executionState: { active: boolean },
@@ -1288,7 +1466,21 @@ export function createToolDispatchers(
 	 * crossing the sandbox boundary.
 	 */
 	grantedSecretAuthorityPackageIds?: ReadonlySet<string> | null,
+	/**
+	 * Trusted per-package binding (GHSA-5fv3): every call through these
+	 * dispatchers runs with this package's secret authority. Generic
+	 * dispatchers omit it and run with the run package's authority only;
+	 * a sandbox-supplied authority field is always discarded.
+	 */
+	binding?: { boundPackageId: string } | null,
 ) {
+	const boundPackageId = binding?.boundPackageId?.trim() || null
+	if (
+		boundPackageId &&
+		!grantedSecretAuthorityPackageIds?.has(boundPackageId)
+	) {
+		throw new Error('Bound package id is not in the run grant set.')
+	}
 	const capturedEvaluationContext = getDynamicWorkerEvaluationContext()
 	const capturedGrantedPackageIds = grantedSecretAuthorityPackageIds ?? null
 	const dispatchers: Record<string, ToolDispatcher> = {}
@@ -1315,8 +1507,9 @@ export function createToolDispatchers(
 			}
 			rawNamesBySanitizedName.set(sanitizedName, name)
 			sanitizedFns[sanitizedName] = async (...rawArgs) => {
-				const { args, requestedPackageId } =
-					takeSecretAuthorityFromCapabilityArgs(rawArgs)
+				// Discard any sandbox-supplied authority field (GHSA-5fv3).
+				const { args } = takeSecretAuthorityFromCapabilityArgs(rawArgs)
+				const requestedPackageId = boundPackageId
 				return await runWithCapturedDynamicWorkerEvaluationContext(
 					capturedEvaluationContext,
 					async () => {

@@ -4,7 +4,10 @@ import { expect, test, vi } from 'vitest'
 import { secretAuthorityArgName } from '#mcp/secrets/secret-authority.ts'
 import { createDynamicWorkerCompatibilityOptions } from '#worker/dynamic-worker-compatibility.ts'
 import { buildPackageStorageId } from '#worker/storage-ids.ts'
-import { createPackageStorageAccessDeniedMessage } from '#worker/storage-runner.ts'
+import {
+	createPackageStorageAccessDeniedMessage,
+	createPackageStorageOwnerOnlyMessage,
+} from '#worker/storage-runner.ts'
 import type * as CloudflareWorkers from 'cloudflare:workers'
 import type * as ModuleGraph from './module-graph.ts'
 import type * as PublishedBundleArtifacts from './published-bundle-artifacts.ts'
@@ -40,23 +43,11 @@ function createKodyProxyForTest(
 	runtimeBridge: unknown,
 	mcpServerNames: Array<string> | (() => Promise<Array<string>>) = [],
 ) {
-	// Host entry defines __kodyReadSecretAuthority at module scope; the extracted
-	// createKodyProxy body closes over it, so unit evals must supply a stub.
-	const readSecretAuthority = () => {
-		const getter = (
-			globalThis as unknown as Record<symbol, (() => string | null) | undefined>
-		)[Symbol.for('kody.getSecretAuthority')]
-		return typeof getter === 'function' ? getter() : ''
-	}
 	return new Function(
 		'runtimeBridge',
 		'mcpServerNamesOrLoader',
-		'__kodyReadSecretAuthority',
 		`${kodyProxySource}; return createKodyProxy(runtimeBridge, mcpServerNamesOrLoader);`,
-	)(runtimeBridge, mcpServerNames, readSecretAuthority) as Record<
-		string,
-		unknown
-	>
+	)(runtimeBridge, mcpServerNames) as Record<string, unknown>
 }
 
 /** Workerd-style: [[OwnPropertyKeys]] then GOPD.value (not plain Get). */
@@ -162,7 +153,8 @@ test('package app kody.mcp supports calls, advertises connected servers, and ded
 		{ set_pin: (args: unknown) => Promise<unknown> }
 	>
 
-	expect(kodyProxySource).toContain(`'${secretAuthorityArgName}'`)
+	// GHSA-5fv3: the run proxy never stamps package authority into args.
+	expect(kodyProxySource).not.toContain(secretAuthorityArgName)
 
 	const withoutNames = createKodyProxyForTest(runtimeBridge)
 	await expect(
@@ -218,9 +210,11 @@ test('package app kody.mcp supports calls, advertises connected servers, and ded
 			pin: '4',
 			[secretAuthorityArgName]: 'pkg-forged',
 		})
+		// A planted getter is ignored; a forged field is passed through to
+		// the bridge, which discards it (see the bridge secret-mount test).
 		expect(calls.at(-1)).toEqual({
 			name: 'mcp:home:set_pin',
-			args: { pin: '4', [secretAuthorityArgName]: 'pkg-stamped' },
+			args: { pin: '4', [secretAuthorityArgName]: 'pkg-forged' },
 		})
 	} finally {
 		delete (globalThis as unknown as Record<symbol, unknown>)[authoritySymbol]
@@ -754,6 +748,9 @@ function createPackageAppRuntimeBridgeForTest(input?: {
 				packageStorageGrantIds: input?.packageStorageGrantIds ?? ['package-1'],
 				credentialClientBinding:
 					input?.credentialClientBinding ?? 'run:test-package-app-binding',
+				packageSecretRefKey: '',
+				packageBindingToken: 'binding-token-for-test',
+				gatewayProps: null,
 			},
 			waitUntil: (promise: Promise<unknown>) => {
 				waitUntilTasks.push(promise)
@@ -822,22 +819,35 @@ test('buildPackageAppWorker serves an artifactName-null artifact hit and reuses 
 	expect(packageAppHostSource).toContain('Leave x-kody-credential-client alone')
 	// Must not statically import runtime.js at entry load: optional exports
 	// (credential) freeze from empty ALS and stay undefined forever. Preload
-	// inside ALS.run via __kodyEnsureRuntimeLoaded and stamp with the module
-	// export (not a forgeable Symbol.for getter).
-	expect(packageAppHostSource).not.toMatch(
-		/import\s*\{[^}]*__kodyGetSecretAuthority[^}]*\}\s*from/,
-	)
+	// inside ALS.run via __kodyEnsureRuntimeLoaded, then enter the runtime's
+	// private package-binding scope (GHSA-5fv3). No ambient getter or header.
 	expect(packageAppHostSource).not.toMatch(
 		/^import .+ from '\.\/\.__kody_virtual__\/runtime\.js'/m,
 	)
 	expect(packageAppHostSource).toContain('__kodyEnsureRuntimeLoaded')
-	expect(packageAppHostSource).toContain('__kodyReadSecretAuthority')
 	expect(packageAppHostSource).toContain(
-		'__kodyGetSecretAuthorityFn = runtimeModule.__kodyGetSecretAuthority',
+		'__kodyRunWithPackageBindingsFn = runtimeModule.__kodyRunWithPackageBindings',
+	)
+	expect(packageAppHostSource).not.toContain('getSecretAuthority')
+	expect(packageAppHostSource).not.toMatch(
+		/headers\.set\([^)]*x-kody-secret-authority/,
 	)
 	const bridgeProps = packageAppRuntimeMock.packageAppRuntimeBridge.mock
-		.calls[0]?.[0] as { props?: { credentialClientBinding?: string } }
+		.calls[0]?.[0] as {
+		props?: {
+			credentialClientBinding?: string
+			packageBindingToken?: string
+			packageStorageGrantIds?: Array<string>
+		}
+	}
 	expect(bridgeProps?.props?.credentialClientBinding).toMatch(/^run:/)
+	// Per-build capability: in the bridge props and the wrapper module only.
+	const token = bridgeProps?.props?.packageBindingToken ?? ''
+	expect(token).toMatch(/^[0-9a-f]{64}$/)
+	expect(packageAppHostSource).toContain(JSON.stringify(token))
+	expect(packageAppHostSource).toContain(
+		`const __kodyPackageBindingIds = __kodyObjectFreezeCaptured(${JSON.stringify(bridgeProps?.props?.packageStorageGrantIds ?? [])});`,
+	)
 })
 
 test('package app createCredentialRuntime exposes callable credential().sign via the bridge', async () => {
@@ -886,16 +896,16 @@ test('package app createCredentialRuntime exposes callable credential().sign via
 	}
 	const createCredentialRuntime = new Function(
 		'runtimeBridge',
-		'packageId',
+		'call',
 		`${createCredentialClientRuntimeSource()}
 		${extractGeneratedSource(
-			'function createCredentialRuntime(runtimeBridge, packageId) {',
+			'function createCredentialRuntime(runtimeBridge, call) {',
 			'\nfunction createRuntime(runtimeBridge, packageContext, mcpServerNamesOrLoader) {',
 		)}
-		return createCredentialRuntime(runtimeBridge, packageId);`,
+		return createCredentialRuntime(runtimeBridge, call);`,
 	) as (
 		bridge: CredentialRuntimeBridge,
-		packageId?: string,
+		call?: (name: string, args: unknown) => Promise<unknown>,
 	) => CredentialRuntime
 
 	const { credential } = createCredentialRuntime(runtimeBridge)
@@ -919,12 +929,18 @@ test('package app createCredentialRuntime exposes callable credential().sign via
 		},
 	])
 
+	// A dependency's credential() goes through its trusted binding call
+	// (GHSA-5fv3); the public bridge never sees a package id.
 	calls.length = 0
-	const bound = createCredentialRuntime(runtimeBridge, 'pkg-dep')
+	const boundCalls: Array<CredentialClientCallInput> = []
+	const bound = createCredentialRuntime(runtimeBridge, async (name, args) => {
+		boundCalls.push({ name, args })
+		return await runtimeBridge.credentialClientCall({ name, args })
+	})
 	await bound.credential('resend')
-	expect(calls[0]).toEqual({
+	expect(boundCalls[0]).toEqual({
 		name: credentialClientToolNames.open,
-		args: { key: 'resend', packageId: 'pkg-dep' },
+		args: { key: 'resend' },
 	})
 })
 
@@ -1455,7 +1471,7 @@ test('package app runtime bridge returns opaque secret refs and merges metadata 
 	})
 })
 
-test('package app secret mounts ignore author-selected packageId and honor the stamp field', async () => {
+test('package app secret mounts ignore author-selected packageId and forged authority fields', async () => {
 	const ref = '{{secret:apiToken|scope=user}}'
 	packageAppRuntimeMock.resolveCredential.mockResolvedValue({
 		alias: 'api-token',
@@ -1468,22 +1484,35 @@ test('package app secret mounts ignore author-selected packageId and honor the s
 	const { bridge } = createPackageAppRuntimeBridgeForTest({
 		packageStorageGrantIds: ['package-1', 'pkg-a'],
 	})
-	const cases: Array<
-		[{ alias: string; packageId: string; [key: string]: string }, string]
-	> = [
-		[{ alias: 'api-token', packageId: 'pkg-a' }, 'package-1'],
+	// GHSA-5fv3: only the trusted per-package binding (packageBoundCall
+	// with the wrapper capability) selects a package; caller fields never do.
+	const forged = (input: Record<string, string>) =>
+		bridge.packageSecretGet(input as { alias: string })
+	const cases: Array<[() => Promise<unknown>, string]> = [
+		[() => forged({ alias: 'api-token', packageId: 'pkg-a' }), 'package-1'],
 		[
-			{
-				alias: 'api-token',
-				packageId: 'package-1',
-				[secretAuthorityArgName]: 'pkg-a',
-			},
+			() =>
+				forged({
+					alias: 'api-token',
+					packageId: 'package-1',
+					[secretAuthorityArgName]: 'pkg-a',
+				}),
+			'package-1',
+		],
+		[
+			() =>
+				bridge.packageBoundCall({
+					token: 'binding-token-for-test',
+					packageId: 'pkg-a',
+					op: 'packageSecretGet',
+					alias: 'api-token',
+				}),
 			'pkg-a',
 		],
 	]
-	for (const [input, resolvedPackageId] of cases) {
+	for (const [call, resolvedPackageId] of cases) {
 		packageAppRuntimeMock.resolveCredential.mockClear()
-		await expect(bridge.packageSecretGet(input)).resolves.toEqual({
+		await expect(call()).resolves.toEqual({
 			value: ref,
 		})
 		expect(packageAppRuntimeMock.resolveCredential).toHaveBeenCalledWith(
@@ -1496,6 +1525,32 @@ test('package app secret mounts ignore author-selected packageId and honor the s
 			}),
 		)
 	}
+
+	// Without the capability, or for a package outside the grant set, the
+	// bound entry points refuse before resolving anything.
+	packageAppRuntimeMock.resolveCredential.mockClear()
+	for (const [token, packageId] of [
+		['wrong-token', 'pkg-a'],
+		['', 'pkg-a'],
+		['binding-token-for-test', 'pkg-not-granted'],
+	] as const) {
+		await expect(
+			bridge.packageBoundCall({
+				token,
+				packageId,
+				op: 'packageSecretGet',
+				alias: 'api-token',
+			}),
+		).rejects.toThrow()
+		await expect(
+			bridge.packageBoundFetch(
+				token,
+				packageId,
+				new Request('https://example.com/api'),
+			),
+		).rejects.toThrow()
+	}
+	expect(packageAppRuntimeMock.resolveCredential).not.toHaveBeenCalled()
 })
 
 test('package app runtime bridge enforces packageStorage grants and raw storage namespace ACLs', async () => {
@@ -1535,17 +1590,49 @@ test('package app runtime bridge enforces packageStorage grants and raw storage 
 	)
 	expect(getValue).toHaveBeenCalledWith({ key: 'count' })
 
+	// A granted dependency bucket is not reachable by naming its id from
+	// the public bridge (that is the app's own code): only the dependency's
+	// trusted binding reaches it (GHSA-5fv3).
 	await expect(
 		bridge.packageStorageSet({
 			packageId: 'dep-package',
 			key: 'flag',
 			value: true,
 		}),
+	).rejects.toThrow(createPackageStorageOwnerOnlyMessage('dep-package'))
+	expect(setValue).not.toHaveBeenCalled()
+	await expect(
+		bridge.packageBoundCall({
+			token: 'binding-token-for-test',
+			packageId: 'dep-package',
+			op: 'packageStorage',
+			name: 'packageStorageSet',
+			args: { packageId: 'dep-package', key: 'flag', value: true },
+		}),
 	).resolves.toEqual({ ok: true })
 	expect(getStorageRunner).toHaveBeenCalledWith(
 		buildPackageStorageId('dep-package'),
 	)
 	expect(setValue).toHaveBeenCalledWith({ key: 'flag', value: true })
+	// The bound binding cannot be pointed at another granted bucket either.
+	await expect(
+		bridge.packageBoundCall({
+			token: 'binding-token-for-test',
+			packageId: 'dep-package',
+			op: 'packageStorage',
+			name: 'packageStorageGet',
+			args: { packageId: 'package-1', key: 'count' },
+		}),
+	).rejects.toThrow(createPackageStorageOwnerOnlyMessage('package-1'))
+	await expect(
+		bridge.packageBoundCall({
+			token: 'wrong-token',
+			packageId: 'dep-package',
+			op: 'packageStorage',
+			name: 'packageStorageGet',
+			args: { key: 'flag' },
+		}),
+	).rejects.toThrow('Package binding capability is invalid.')
 
 	await expect(
 		bridge.packageStorageGet({ packageId: 'victim-package', key: 'secret' }),

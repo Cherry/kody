@@ -283,6 +283,11 @@ export type ResolveCredentialInput<T extends CredentialTarget> = {
 	 * package buckets or rules.
 	 */
 	runPackageId?: string | null
+	/**
+	 * The run's own package id (null = ad hoc execute) for the nested
+	 * personal-secret rule (GHSA-5fv3).
+	 */
+	runContextPackageId?: string | null
 	/** App origin for approval links in denial messages. */
 	baseUrl: string
 	/**

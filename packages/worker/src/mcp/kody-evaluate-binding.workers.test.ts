@@ -167,7 +167,9 @@ export default async function main() {
 			ping: { echoed: { n: 1 } },
 			globalKody: 'undefined',
 			runtimeStorage: 'function',
-			authority: 'function',
+			// GHSA-5fv3: no global secret-authority getter; identity is a
+			// trusted per-package binding.
+			authority: 'undefined',
 		})
 
 		const helper = await runBundledModuleWithRegistry(

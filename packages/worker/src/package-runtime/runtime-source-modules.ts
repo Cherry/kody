@@ -75,43 +75,122 @@ export function createRuntimeModuleSource() {
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 const __kodyRuntimeStorageSymbol = Symbol.for('kody.runtimeStorage');
-const __kodyGetSecretAuthoritySymbol = Symbol.for('kody.getSecretAuthority');
 const __globalAny = /** @type {any} */ (globalThis);
 const __kodyRuntimeStorage =
 	__globalAny[__kodyRuntimeStorageSymbol] ??
 	(__globalAny[__kodyRuntimeStorageSymbol] = new AsyncLocalStorage());
-// Stamp ALS + runner stay module-local (re-exports share one evaluation).
-// Do not hang the runner on Symbol.for — package code can steal it.
-const __kodySecretAuthorityAls = new AsyncLocalStorage();
-function __kodyReadSecretAuthority() {
-	const current = __kodySecretAuthorityAls.getStore();
-	return typeof current === 'string' && current.trim() ? current.trim() : null;
+// Trusted per-package bindings (GHSA-5fv3). Package secret identity is a
+// host-set stamp on a per-package binding (a gateway fetcher plus a kody
+// dispatcher minted for exactly one package), never a header, slot, or
+// AsyncLocalStorage value package code can set, read, replace, or nest.
+// The host wrapper enters this module-private scope once per run with a
+// Map of package id -> binding. It is never published on globalThis or
+// re-exported through kody:runtime, so package code cannot reach the Map,
+// enter its own scope, or name another package's entry. Each package's
+// module-bound fetch / kody / packageSecrets closes over its own id
+// lexically and looks up only that entry. Intrinsics are captured at first
+// evaluation (the wrapper imports this module before any package code).
+const __kodyReflectApply = Reflect.apply;
+const __kodyAlsRun = AsyncLocalStorage.prototype.run;
+const __kodyAlsGetStore = AsyncLocalStorage.prototype.getStore;
+const __kodyMapGet = Map.prototype.get;
+const __kodyStringTrim = String.prototype.trim;
+const __kodyStringStartsWith = String.prototype.startsWith;
+const __kodyErrorCtor = Error;
+const __kodyEncodeURIComponent = encodeURIComponent;
+const __kodyPackageBindingStorage = new AsyncLocalStorage();
+// Prefer the instance getStore (works for real ALS and the local-execute
+// frozen storage view). Captured at init so later forgeries on the object
+// are ignored; Reflect.apply keeps this-binding correct.
+const __kodyRuntimeGetStore = __kodyRuntimeStorage.getStore;
+const __kodyCapturedGlobalFetch = __globalAny.fetch;
+function __kodyGetRuntimeStore() {
+	return __kodyReflectApply(__kodyRuntimeGetStore, __kodyRuntimeStorage, []);
 }
-function __kodyRunWithSecretAuthority(packageId, callback) {
-	return __kodySecretAuthorityAls.run(packageId, callback);
+// GHSA-5fv3: static import wrappers no longer enter any secret authority.
+// Kept as a pass-through so the metering wrapper on main merges unchanged;
+// it must never open authority around importer-reachable code.
+function __kodyRunWithSecretAuthority(_packageId, callback) {
+	return callback();
 }
 // Intrinsic AsyncFunction prototype — never read target.constructor (package
-// code can null or forge it). Used only to choose async vs sync ALS.run.
+// code can null or forge it). Used only to choose async vs sync handling.
 const __kodyAsyncFunctionPrototype = Object.getPrototypeOf(async function () {});
-// Sealed global getter for back-compat readers. Reinstall when absent or
-// still configurable. A sealed pre-planted getter cannot be replaced —
-// host wrappers prefer the module export so that forge cannot stamp.
-{
-	const existing = Object.getOwnPropertyDescriptor(
-		__globalAny,
-		__kodyGetSecretAuthoritySymbol,
+export function __kodyRunWithPackageBindings(bindings, callback) {
+	return __kodyReflectApply(__kodyAlsRun, __kodyPackageBindingStorage, [
+		bindings,
+		callback,
+	]);
+}
+function __kodyPackageBindingFor(packageId) {
+	const bindings = __kodyReflectApply(
+		__kodyAlsGetStore,
+		__kodyPackageBindingStorage,
+		[],
 	);
-	if (!existing || existing.configurable) {
-		Object.defineProperty(__globalAny, __kodyGetSecretAuthoritySymbol, {
-			value: __kodyReadSecretAuthority,
-			writable: false,
-			configurable: false,
-			enumerable: false,
-		});
+	if (bindings == null) return null;
+	try {
+		return __kodyReflectApply(__kodyMapGet, bindings, [packageId]) ?? null;
+	} catch {
+		return null;
 	}
 }
-export function __kodyGetSecretAuthority() {
-	return __kodyReadSecretAuthority();
+function __kodyNormalizeSecretAlias(alias, method) {
+	const normalized =
+		typeof alias === 'string' ? __kodyReflectApply(__kodyStringTrim, alias, []) : '';
+	if (!normalized) {
+		throw new __kodyErrorCtor(\`packageSecrets.\${method} requires a non-empty alias.\`);
+	}
+	return normalized;
+}
+export function __kodyCreatePackageBoundFetch(packageId) {
+	return function fetch(input, init) {
+		const binding = __kodyPackageBindingFor(packageId);
+		// No binding on this surface: an unbound fetch with the run's own
+		// identity only (never this package's).
+		if (binding == null) {
+			return __kodyReflectApply(__kodyCapturedGlobalFetch, undefined, [input, init]);
+		}
+		return binding.fetch(input, init);
+	};
+}
+export function __kodyCreatePackageBoundKody(packageId) {
+	return new Proxy(Object.create(null), {
+		get(_target, property) {
+			if (typeof property === 'symbol' || property === 'then') return undefined;
+			if (property === 'mcp') {
+				// Package-locked MCP servers check the caller's package, so a
+				// bound package's MCP calls go through its own binding.
+				const binding = __kodyPackageBindingFor(packageId);
+				const boundMcp =
+					binding != null && typeof binding.kodyMcp === 'function'
+						? binding.kodyMcp()
+						: null;
+				if (boundMcp != null) return boundMcp;
+				const store = __kodyGetRuntimeStore();
+				return store?.kody?.mcp;
+			}
+			return function (args) {
+				const binding = __kodyPackageBindingFor(packageId);
+				const name = String(property);
+				if (
+					binding != null &&
+					!__kodyReflectApply(__kodyStringStartsWith, name, ['mcp:'])
+				) {
+					return binding.kodyCall(name, args);
+				}
+				// Unbound surface (or the flat mcp: teaching error): the run's
+				// own dispatcher, which never carries this package's authority.
+				const store = __kodyGetRuntimeStore();
+				const exp = store?.kody;
+				const fn = exp == null ? undefined : exp[property];
+				if (typeof fn !== 'function') {
+					throw new __kodyErrorCtor(\`kody:runtime export "kody.\${name}" is not callable in this execution context.\`);
+				}
+				return __kodyReflectApply(fn, exp, [args]);
+			};
+		},
+	});
 }
 
 export function __kodyRunInRuntime(runtime, callback) {
@@ -119,7 +198,7 @@ export function __kodyRunInRuntime(runtime, callback) {
 }
 
 function __kodyReadRuntimeExport(exportName) {
-	const currentRuntime = __kodyRuntimeStorage.getStore();
+	const currentRuntime = __kodyGetRuntimeStore();
 	const runtimeExport = currentRuntime?.[exportName];
 	if (runtimeExport == null) {
 		throw new Error(
@@ -520,17 +599,43 @@ function __kodyResolvePackageStorage(packageId) {
 // Factory for the bundler's per-package virtual runtime modules: each module
 // that originates from a saved package imports 'kody:runtime' through a
 // module whose packageStorage closes over that package's immutable id (see
-// createPackageRuntimeModuleSource). The closure survives bundler inlining,
-// and the host independently validates the id against the run's provenance
-// grants, so this stamp routes identity without being a security boundary.
+// createPackageRuntimeModuleSource). The closure survives bundler inlining.
+// With a trusted per-package binding in scope (GHSA-5fv3), the bucket goes
+// through that package's host-bound call path: the host fixes the bucket to
+// the bound package, so naming another granted id is denied. Without a
+// binding the run store's factory answers, and the host lets unbound calls
+// reach only the run package's own bucket.
+function __kodyCreateBindingPackageStorage(binding, packageId) {
+	const call = async (toolName, args) =>
+		await __kodyReflectApply(binding.packageStorageCall, binding, [
+			toolName,
+			args,
+		]);
+	return {
+		id: 'package:' + __kodyEncodeURIComponent(packageId),
+		get: async (key) => (await call('packageStorageGet', { packageId, key })).value,
+		list: async (options = {}) =>
+			await call('packageStorageList', { ...options, packageId }),
+		sql: async (query, params = []) =>
+			await call('packageStorageSql', { packageId, query, params, writable: true }),
+		set: async (key, value) =>
+			await call('packageStorageSet', { packageId, key, value }),
+		delete: async (key) => await call('packageStorageDelete', { packageId, key }),
+		clear: async () => await call('packageStorageClear', { packageId }),
+	};
+}
 export function __kodyCreatePackageBoundStorage(packageId) {
 	return function packageStorage() {
+		const binding = __kodyPackageBindingFor(packageId);
+		if (binding != null && typeof binding.packageStorageCall === 'function') {
+			return __kodyCreateBindingPackageStorage(binding, packageId);
+		}
 		return __kodyResolvePackageStorage(packageId);
 	};
 }
 
 function __kodyResolvePackageSecrets(packageId) {
-	const currentRuntime = __kodyRuntimeStorage.getStore();
+	const currentRuntime = __kodyGetRuntimeStore();
 	const factory = currentRuntime?.__kodyPackageSecrets;
 	if (typeof factory !== 'function') {
 		throw new Error(
@@ -543,19 +648,28 @@ function __kodyResolvePackageSecrets(packageId) {
 // Factory for the bundler's per-package virtual runtime modules: each module
 // that originates from a saved package imports 'kody:runtime' through a
 // module whose packageSecrets closes over that package's immutable id (see
-// createPackageRuntimeModuleSource). The host independently validates the
-// id against the run's provenance grants, so this stamp routes secret
-// authority without being a security boundary.
+// createPackageRuntimeModuleSource). With a trusted per-package binding in
+// scope, get/has go straight to that package's host-bound dispatcher
+// (GHSA-5fv3): no runtime-store factory, no ambient authority, and the
+// alias is validated with intrinsics captured at init. Without a binding
+// (surfaces that mint none) the run store's factory answers with the run's
+// own identity only.
 export function __kodyCreatePackageBoundSecrets(packageId) {
+	const call = async (method, alias) => {
+		const normalizedAlias = __kodyNormalizeSecretAlias(alias, method);
+		const binding = __kodyPackageBindingFor(packageId);
+		if (binding != null) {
+			return method === 'get'
+				? await binding.packageSecretGet(normalizedAlias)
+				: await binding.packageSecretHas(normalizedAlias);
+		}
+		const secrets = __kodyResolvePackageSecrets(packageId);
+		const fn = secrets[method];
+		return await __kodyReflectApply(fn, secrets, [normalizedAlias]);
+	};
 	return {
-		get: async (alias) =>
-			__kodyRunWithSecretAuthority(packageId, () =>
-				__kodyResolvePackageSecrets(packageId).get(alias),
-			),
-		has: async (alias) =>
-			__kodyRunWithSecretAuthority(packageId, () =>
-				__kodyResolvePackageSecrets(packageId).has(alias),
-			),
+		get: async (alias) => await call('get', alias),
+		has: async (alias) => await call('has', alias),
 	};
 }
 
@@ -792,13 +906,20 @@ export const credential = __kodyOptionalRuntimeFunctionExport('credential') &&
 export const credentials = __kodyOptionalRuntimeFunctionExport('credentials');
 
 // Factory for the per-package virtual runtime modules: an imported package's
-// \`credential(key)\` reads that package's needs, not the entry package's. The
-// host accepts the id only when it is in the run's provenance, and it selects
-// needs only; it grants nothing.
+// \`credential(key)\` resolves as that package (its needs, mappings, and
+// bound Keys). With a trusted per-package binding in scope (GHSA-5fv3) the
+// call goes through that package's host-bound path; the host never takes the
+// package from an argument. Without a binding the run's own identity answers.
 function __kodyResolvePackageCredentialRuntime(packageId) {
-	const factory = __kodyRuntimeStorage.getStore()?.__kodyCredentialRuntimeFor;
+	const factory = __kodyGetRuntimeStore()?.__kodyCredentialRuntimeFor;
 	if (typeof factory !== 'function') {
 		throw new Error('kody:runtime export "credential" is not callable in this execution context.');
+	}
+	const binding = __kodyPackageBindingFor(packageId);
+	if (binding != null && typeof binding.credentialCall === 'function') {
+		return factory(packageId, (name, args) =>
+			__kodyReflectApply(binding.credentialCall, binding, [name, args]),
+		);
 	}
 	return factory(packageId);
 }
@@ -892,6 +1013,20 @@ export function isKodyRuntimeModulePath(modulePath: string) {
 		modulePath === runtimeModulePath ||
 		modulePath.endsWith(`/${runtimeModulePath}`)
 	)
+}
+
+/**
+ * Path of a shared runtime module in a bundle (canonical root preferred,
+ * else the shortest prefixed copy, which re-exports the primary). The host
+ * wrapper imports it to install the trusted per-package bindings.
+ */
+export function findKodyRuntimeModulePath(
+	modules: Record<string, unknown> | null | undefined,
+): string | null {
+	if (!modules) return null
+	const paths = Object.keys(modules).filter(isKodyRuntimeModulePath)
+	if (paths.length === 0) return null
+	return pickPrimaryRuntimeModulePath(paths)
 }
 
 export function isCanonicalKodyRuntimeModulePath(modulePath: string) {
@@ -1026,13 +1161,15 @@ export function createPackageRuntimeModuleSource(packageId: string) {
 	// `.__kody_virtual__/runtime.js`), in every graph or artifact prefix.
 	const baseRuntimeSpecifier = '../runtime.js'
 	const sharedExportNames = kodyRuntimeSharedExportNames.filter(
-		(name) => !packageBoundCredentialExportNames.has(name),
+		(name) => !packageBoundCredentialExportNames.has(name) && name !== 'kody',
 	)
 	return `
 export { ${sharedExportNames.join(', ')} } from ${JSON.stringify(baseRuntimeSpecifier)};
-import __kodyBaseRuntimeDefault, { __kodyCreatePackageBoundStorage, __kodyCreatePackageBoundSecrets, __kodyCreatePackageBoundCredentialRuntime } from ${JSON.stringify(
+import __kodyBaseRuntimeDefault, { __kodyCreatePackageBoundStorage, __kodyCreatePackageBoundSecrets, __kodyCreatePackageBoundCredentialRuntime, __kodyCreatePackageBoundFetch, __kodyCreatePackageBoundKody } from ${JSON.stringify(
 		baseRuntimeSpecifier,
 	)};
+export const __kodyBoundFetch = __kodyCreatePackageBoundFetch(${JSON.stringify(packageId)});
+export const kody = __kodyCreatePackageBoundKody(${JSON.stringify(packageId)});
 export const packageStorage = __kodyCreatePackageBoundStorage(${JSON.stringify(
 		packageId,
 	)});
@@ -1176,11 +1313,10 @@ export function refreshKodyRuntimeModules(
 		)
 	}
 	// Artifact-only graphs omit the canonical root and used to materialize a
-	// full runtime copy at every prefix. That created multiple stamp ALS
-	// instances while `globalThis[Symbol.for('kody.getSecretAuthority')]`
-	// kept the first getter — stamps wrote one store and reads saw another.
-	// Evaluate the full runtime once at the primary path; every other copy
-	// re-exports that root.
+	// full runtime copy at every prefix. That created multiple module-private
+	// stores (the package-binding scope among them) — the host wrapper would
+	// enter one while facades read another. Evaluate the full runtime once at
+	// the primary path; every other copy re-exports that root.
 	const primaryRuntimePath = includeCanonicalRoot
 		? runtimeModulePath
 		: pickPrimaryRuntimeModulePath(runtimePaths)

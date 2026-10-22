@@ -76,6 +76,13 @@ facts, one rule each:
 | `packageContext`   | the run                          | one ambient; A only when the run _is_ A                                                                  |
 | Secrets            | declaring module (bundler stamp) | user-secret `allowed_packages` and `packageSecrets` mounts check the stamp when the call site is stamped |
 
+The grant set says which buckets a run may reach; the calling package says whose
+bucket it is. Importer code and other packages in the same run cannot read or
+write A's bucket by passing A's id to `kody.packageStorage*` or the app bridge.
+Only A's own `packageStorage()` reaches it. The same holds for `credential()`: a
+credential client opens as the calling package (its needs, mappings, and bound
+Keys), so naming A's id on `kody.credentialClient*` or the app bridge is denied.
+
 **Composition:** static `import` when the name is known (library in this
 isolate). Computed `import(specifier)` when the name is data (caller-owned /
 forks). Workflows when you need exactly-once. Do not point `packageContext` at

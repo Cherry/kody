@@ -60,11 +60,10 @@ import {
 } from '#mcp/secrets/secret-placement.ts'
 import {
 	grantedSecretAuthorityPackageIdSet,
-	readSecretAuthorityHeader,
-	resolveSecretAuthorityPackageId,
 	secretAuthorityHeaderName,
 	storageContextWithSecretAuthority,
 } from '#mcp/secrets/secret-authority.ts'
+import { verifyPackageSecretRef } from '#mcp/secrets/package-secret-ref.ts'
 import {
 	attestedPackageStamp,
 	claimedPackageStamp,
@@ -134,6 +133,15 @@ type FetchGatewayProps = {
 	 */
 	claimedPackageId?: string | null
 	/**
+	 * Trusted per-package binding (GHSA-5fv3). The host mints one gateway
+	 * binding per package in the run's grant set and sets this prop on it;
+	 * only that package's module-bound `fetch` holds the binding. Package
+	 * secret identity comes from this host-set prop, never from a request
+	 * header or any value sandbox code can set, read, replace, or nest.
+	 * Must name a package in `grantedSecretAuthorityPackageIds`.
+	 */
+	boundPackageId?: string | null
+	/**
 	 * When false, every sandbox `fetch` is rejected. Retriever runs use
 	 * this to stay closed-world. Defaults to true.
 	 */
@@ -148,6 +156,11 @@ type FetchGatewayProps = {
 	 * handles resolve with its credential authority, not `request`.
 	 */
 	ownerCredentialScope?: OwnerCredentialScope | null
+	/**
+	 * Per-run HMAC key for package-scoped `packageSecrets.get` placeholders
+	 * (GHSA-5fv3). Omitted outside bundled sandbox runs.
+	 */
+	packageSecretRefKey?: string | null
 }
 export type { FetchGatewayProps }
 
@@ -449,7 +462,7 @@ export async function expandSecretPlaceholders(input: {
 	if (!baseUrl) {
 		throw new Error('Fetch gateway requires a non-empty baseUrl in props.')
 	}
-	const packageStamp = resolveGatewayPackageStamp(input.props, headers)
+	const packageStamp = resolveGatewayPackageStamp(input.props)
 	const storageContext = storageContextWithSecretAuthority(
 		input.props.storageContext,
 		packageStamp?.packageId ?? null,
@@ -743,6 +756,11 @@ export async function expandSecretPlaceholders(input: {
 			actor: input.props.request,
 			packageStamp,
 			baseUrl: input.props.baseUrl,
+			// Run package id for the nested personal-secret rule (GHSA-5fv3).
+			runContextPackageId:
+				packageStamp?.kind === 'claimed'
+					? undefined
+					: (input.props.storageContext?.packageId ?? null),
 		}
 		const entriesToResolve = <
 			T extends {
@@ -797,6 +815,37 @@ export async function expandSecretPlaceholders(input: {
 		})
 		const settledSecretResults = await Promise.allSettled(
 			secretsToResolve.map(async ({ referenced, credential }) => {
+				// Package-scoped placeholders issued by packageSecrets.get carry a
+				// per-run HMAC bound to the declaring package (GHSA-5fv3). A stolen
+				// placeholder cannot be filled under another package's authority.
+				if (
+					referenced.scope === 'package' &&
+					referenced.ref &&
+					input.props.packageSecretRefKey
+				) {
+					const authorityId = packageStamp?.packageId ?? null
+					const ok =
+						authorityId != null &&
+						(await verifyPackageSecretRef({
+							refKey: input.props.packageSecretRefKey,
+							packageId: authorityId,
+							alias: referenced.name,
+							ref: referenced.ref,
+						}))
+					if (!ok) {
+						throw new McpCallerError(
+							`Package-scoped secret "${referenced.name}" was not issued for this package runtime.`,
+						)
+					}
+				} else if (
+					referenced.scope === 'package' &&
+					referenced.ref &&
+					!input.props.packageSecretRefKey
+				) {
+					throw new McpCallerError(
+						`Package-scoped secret "${referenced.name}" requires a package runtime that issues secret refs.`,
+					)
+				}
 				const resolved = await resolveCredential({
 					...resolveInput,
 					credential,
@@ -959,6 +1008,10 @@ export async function expandSecretPlaceholders(input: {
 				}
 			}
 		})
+		// A body-fill denial also errors the request stream, so the upstream
+		// fetch rejects before the caller reaches `await bodyFillDone`. Mark the
+		// derived promise handled; callers that do await it still see the error.
+		bodyFillDone.catch(() => {})
 		// Body length may change as placeholders fill.
 		headers.delete('content-length')
 	} else if (resolutionMode === 'headers-only') {
@@ -1184,33 +1237,35 @@ async function classifyStreamingBody(input: {
 
 /**
  * Which package is fetching. A CapabilityProxy claim is `claimed`. Otherwise
- * the host-set run package, or a header naming a package in the run's grant
- * set, is `attested`.
+ * the host-set per-package binding (`boundPackageId`), or else the host-set
+ * run package, is `attested`. Request headers never select the package
+ * (GHSA-5fv3): sandbox code can set, read, and replay any header.
  */
-function resolveGatewayPackageStamp(
+export function resolveGatewayPackageStamp(
 	props: FetchGatewayProps,
-	headers: Headers,
 ): PackageStamp | null {
 	const claimed = claimedPackageStamp(props.claimedPackageId)
 	if (claimed) {
-		if (props.storageContext?.packageId) {
+		if (props.storageContext?.packageId || props.boundPackageId) {
 			throw new Error(
-				'Fetch gateway props cannot carry both a claimed package id and a run package id.',
+				'Fetch gateway props cannot carry both a claimed package id and a run or bound package id.',
 			)
 		}
 		return claimed
 	}
-	const grantedPackageIds =
-		grantedSecretAuthorityPackageIdSet(
+	const bound = props.boundPackageId?.trim() || null
+	if (bound) {
+		const grantedPackageIds = grantedSecretAuthorityPackageIdSet(
 			props.grantedSecretAuthorityPackageIds,
-		) ?? new Set<string>()
-	return attestedPackageStamp(
-		resolveSecretAuthorityPackageId({
-			requestedPackageId: readSecretAuthorityHeader(headers, grantedPackageIds),
-			grantedPackageIds,
-			runPackageId: props.storageContext?.packageId,
-		}),
-	)
+		)
+		if (!grantedPackageIds?.has(bound)) {
+			throw new Error(
+				'Fetch gateway bound package id is not in the run grant set.',
+			)
+		}
+		return attestedPackageStamp(bound)
+	}
+	return attestedPackageStamp(props.storageContext?.packageId?.trim() || null)
 }
 
 /**

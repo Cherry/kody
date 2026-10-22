@@ -607,7 +607,12 @@ test('buildKodyFns rejects package storage kody tools that collide with capabili
 					displayName: 'User Example',
 				},
 			}),
-			{ packageStorageTools: { grantedPackageIds: new Set(['pkg-1']) } },
+			{
+				packageStorageTools: {
+					grantedPackageIds: new Set(['pkg-1']),
+					runPackageId: 'pkg-1',
+				},
+			},
 		),
 	).rejects.toThrow(
 		'Kody helper "packageStorageGet" collides with a capability.',
@@ -648,7 +653,12 @@ test('packageStorage keys StorageRunner by the bound org, not the caller person'
 					? { org: { id: orgId, slug: 'team' }, role: 'member' }
 					: null,
 			}),
-			{ packageStorageTools: { grantedPackageIds: new Set(['pkg-1']) } },
+			{
+				packageStorageTools: {
+					grantedPackageIds: new Set(['pkg-1']),
+					runPackageId: 'pkg-1',
+				},
+			},
 		)
 		await (fns as Record<string, (args: unknown) => Promise<unknown>>)
 			.packageStorageGet!({ packageId: 'pkg-1', key: 'k' })
@@ -751,6 +761,7 @@ export default async function run() {
 			orgId: callerContext.request?.org.id,
 			actor: callerContext.request,
 			packageStamp: { kind: 'attested', packageId: 'package-123' },
+			runContextPackageId: 'package-123',
 			baseUrl: callerContext.baseUrl,
 			credential: {
 				use: 'package-secret-mount',

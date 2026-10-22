@@ -45,6 +45,11 @@ export type PackageStorageToolOptions = {
 	 */
 	grantedPackageIds: ReadonlySet<string>
 	/**
+	 * The run's own package id (null for ad hoc execute). Unbound calls may
+	 * reach only this package's bucket (GHSA-5fv3).
+	 */
+	runPackageId?: string | null
+	/**
 	 * Defaults to writable. Retriever runs set this to false so the sandbox
 	 * can read granted buckets but cannot set, delete, clear, or run mutating
 	 * SQL.
@@ -212,9 +217,11 @@ export type RuntimeHelperKodyToolSet = {
 
 function createPackageSecretsFactoryPrelude() {
 	return `
+const __kodyPsTrim = String.prototype.trim;
+const __kodyPsApply = Reflect.apply;
 const __kodyPackageSecrets = (packageId) => ({
   get: async (alias) => {
-    const normalizedAlias = typeof alias === 'string' ? alias.trim() : '';
+    const normalizedAlias = typeof alias === 'string' ? __kodyPsApply(__kodyPsTrim, alias, []) : '';
     if (!normalizedAlias) {
       throw new Error('packageSecrets.get requires a non-empty alias.')
     }
@@ -224,7 +231,7 @@ const __kodyPackageSecrets = (packageId) => ({
     return typeof result?.value === 'string' ? result.value : '';
   },
   has: async (alias) => {
-    const normalizedAlias = typeof alias === 'string' ? alias.trim() : '';
+    const normalizedAlias = typeof alias === 'string' ? __kodyPsApply(__kodyPsTrim, alias, []) : '';
     if (!normalizedAlias) {
       throw new Error('packageSecrets.has requires a non-empty alias.')
     }
@@ -251,9 +258,13 @@ ${createCredentialClientRuntimeSource()}
 const { credential, credentials } = __kodyCreateCredentialRuntime(
   (name, args) => ${kodyCallDispatcherName}(name, args),
 );
-const __kodyCredentialRuntimeFor = (packageId) =>
+// \`call\` is the package's trusted binding call (GHSA-5fv3). Without one
+// the run dispatcher answers as the run package, so no package id is sent.
+const __kodyCredentialRuntimeFor = (_packageId, call) =>
   __kodyCreateCredentialRuntime((name, args) =>
-    ${kodyCallDispatcherName}(name, { ...(args ?? {}), packageId }),
+    typeof call === 'function'
+      ? call(name, args ?? {})
+      : ${kodyCallDispatcherName}(name, args ?? {}),
   );
 	`.trim()
 }
@@ -542,6 +553,7 @@ const runtimeHelperManifest: Array<RuntimeHelperManifestEntry> = [
 				email: entitlementEmailForOwner(context.callerContext, ownerId),
 				grantedPackageIds: packageStorageTools.grantedPackageIds,
 				writable: packageStorageTools.writable,
+				runPackageId: packageStorageTools.runPackageId ?? null,
 			})
 		},
 	},

@@ -66,21 +66,14 @@ export function createKodyProviderProxySource(input: { providerName: string }) {
 	const mcpFlatNamePrefix = kodyCapabilityNamespaceConfigs.mcp.flatNamePrefix
 	const source = `    const __kodyCreateRemoteProxy = ${kodyRemoteProxyFactorySource};
     const ${kodyCallDispatcherName} = async (dispatchName, args) => {
-      const __kodyGetSecretAuthority = globalThis[Symbol.for('kody.getSecretAuthority')];
-      const __kodySecretAuthority =
-        typeof __kodyGetSecretAuthority === 'function'
-          ? String(__kodyGetSecretAuthority() ?? '').trim()
-          : '';
-      // Object args (including omitted/undefined → {}) carry the stamp field.
-      // Non-object args cannot host the reserved key; leave them unchanged.
+      // Generic dispatcher: never carries package secret authority. A
+      // package's own kody calls go through its trusted per-package
+      // binding (GHSA-5fv3). Drop any forged reserved field.
       const payload =
         args == null || (typeof args === 'object' && !Array.isArray(args))
           ? (() => {
               const next = { ...(args ?? {}) };
               delete next[${JSON.stringify(secretAuthorityArgName)}];
-              if (__kodySecretAuthority) {
-                next[${JSON.stringify(secretAuthorityArgName)}] = __kodySecretAuthority;
-              }
               return next;
             })()
           : args;

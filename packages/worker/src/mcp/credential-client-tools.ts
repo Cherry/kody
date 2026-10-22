@@ -11,6 +11,7 @@ import {
 	openCredentialClients,
 	refreshCredentialClient,
 	signWithCredentialClient,
+	CredentialClientError,
 	toCredentialClientError,
 	validateCredentialCallMap,
 	type CredentialClientContext,
@@ -35,6 +36,32 @@ async function asResult(run: () => Promise<unknown>) {
 		if (!structured) throw error
 		return { ok: false, error: structured.body }
 	}
+}
+
+export function createCredentialClientOwnerOnlyMessage(packageId: string) {
+	return `credential() for package "${packageId}" is only available to that package's own code. Importer code and other packages in the same run cannot open its credentials by naming its package id; call an export of that package so its own credential() opens them.`
+}
+
+/**
+ * The package a hosted credential client call acts as: the calling package
+ * the host bound (GHSA-5fv3), never an id the sandbox names. A claimed id is
+ * accepted only when it is that package.
+ */
+export function resolveCallerCredentialPackageId(input: {
+	requested: unknown
+	callerPackageId: string | null
+}): string | null {
+	const caller = input.callerPackageId?.trim() || null
+	const requested =
+		typeof input.requested === 'string' ? input.requested.trim() : ''
+	if (requested && requested !== caller) {
+		throw new CredentialClientError({
+			code: 'credential_denied',
+			message: createCredentialClientOwnerOnlyMessage(requested),
+			retryWith: [],
+		})
+	}
+	return caller
 }
 
 export function createCredentialClientKodyTools(input: {

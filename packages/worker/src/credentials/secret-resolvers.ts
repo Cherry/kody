@@ -172,6 +172,7 @@ export const secretResolver: CredentialResolver<'secret'> = {
 					userId: lookup.ownerId,
 					storageContext: credential.storageContext,
 					authorityPackageId: input.packageStamp?.packageId ?? null,
+					runContextPackageId: input.runContextPackageId,
 					secretName: credential.name,
 					resolved: found,
 				})
@@ -345,6 +346,7 @@ export const packageSecretMountResolver: CredentialResolver<'package-secret-moun
 						userId: input.orgId,
 						storageContext,
 						authorityPackageId: packageId,
+						runContextPackageId: input.runContextPackageId,
 						secretName: mount.name,
 						resolved: found,
 					})

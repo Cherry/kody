@@ -1133,16 +1133,15 @@ test('local isolate wraps globalThis.fetch so frozen copies still hop secrets', 
 	}
 })
 
-test('local meter stamp overrides closed-over gatewayFetch packageId for nested imports', async () => {
-	const { AsyncLocalStorage } = await import('node:async_hooks')
+test('local bound gatewayFetch uses closed-over packageId; meter does not elevate (GHSA-5fv3)', async () => {
 	const shim = createLocalExecuteRuntimeShimSource(runtimeModulePath)
 
-	const alsStart = shim.indexOf('const __kodySecretAuthorityAls')
-	const alsEnd = shim.indexOf('// Pure placeholder builders')
-	expect(alsStart).toBeGreaterThan(-1)
-	expect(alsEnd).toBeGreaterThan(alsStart)
-	const alsSource = shim
-		.slice(alsStart, alsEnd)
+	const slotStart = shim.indexOf('const __kodyGetSecretAuthoritySymbol')
+	const slotEnd = shim.indexOf('// Pure placeholder builders')
+	expect(slotStart).toBeGreaterThan(-1)
+	expect(slotEnd).toBeGreaterThan(slotStart)
+	const slotSource = shim
+		.slice(slotStart, slotEnd)
 		.replaceAll(/^export /gm, '')
 		.replaceAll('/** @type {any} */ (globalThis)', 'globalThis')
 
@@ -1184,9 +1183,8 @@ test('local meter stamp overrides closed-over gatewayFetch packageId for nested 
 		__kodyMeterStaticPackageExport,
 		__kodyGetSecretAuthority,
 	} = new Function(
-		'AsyncLocalStorage',
 		'kody',
-		`${alsSource}
+		`${slotSource}
 ${gatewaySource}
 ${meterSource}
 return {
@@ -1195,7 +1193,7 @@ return {
 	__kodyMeterStaticPackageExport,
 	__kodyGetSecretAuthority,
 };`,
-	)(AsyncLocalStorage, kody) as {
+	)(kody) as {
 		__kodyCreatePackageBoundGatewayFetch: (
 			packageId: string,
 		) => (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
@@ -1209,14 +1207,17 @@ return {
 
 	const outerBoundFetch =
 		__kodyCreatePackageBoundGatewayFetch('pkg-outer-friction')
+	const nestedBoundFetch = __kodyCreatePackageBoundGatewayFetch(
+		'pkg-nested-grok-bot',
+	)
+	// Metering only — no ambient secret authority (GHSA-5fv3).
 	const nestedWake = __kodyMeterStaticPackageExport(
 		'pkg-nested-grok-bot',
 		async () => {
-			expect(__kodyGetSecretAuthority()).toBe('pkg-nested-grok-bot')
-			// Preliminary await before fetch — workerd keeps ALS only when the
-			// meter wrapper awaits the callee inside ALS.run (kody#2876 / Devin).
+			expect(__kodyGetSecretAuthority()).toBeNull()
 			await Promise.resolve()
-			expect(__kodyGetSecretAuthority()).toBe('pkg-nested-grok-bot')
+			expect(__kodyGetSecretAuthority()).toBeNull()
+			// Calling through the outer closed-over binding stamps as outer.
 			await outerBoundFetch('https://api2.cursor.sh/automations/webhook/x', {
 				method: 'POST',
 				headers: {
@@ -1229,11 +1230,11 @@ return {
 
 	expect(__kodyGetSecretAuthority()).toBeNull()
 	const result = await nestedWake()
-	expect(result.duringStamp).toBe('pkg-nested-grok-bot')
+	expect(result.duringStamp).toBeNull()
 	expect(__kodyGetSecretAuthority()).toBeNull()
 	expect(gatewayCalls).toHaveLength(1)
 	expect(gatewayCalls[0]).toMatchObject({
-		packageId: 'pkg-nested-grok-bot',
+		packageId: 'pkg-outer-friction',
 		request: {
 			url: 'https://api2.cursor.sh/automations/webhook/x',
 			headers: {
@@ -1243,13 +1244,25 @@ return {
 	})
 
 	gatewayCalls.length = 0
+	// Nested package identity comes from its own bound fetch, not meter ALS.
+	await nestedBoundFetch('https://api2.cursor.sh/automations/webhook/y', {
+		method: 'POST',
+		headers: {
+			authorization: 'Bearer {{secret:grokBotWake.nested|scope=package}}',
+		},
+	})
+	expect(gatewayCalls).toHaveLength(1)
+	expect(gatewayCalls[0]).toMatchObject({
+		packageId: 'pkg-nested-grok-bot',
+	})
+
+	gatewayCalls.length = 0
 	await outerBoundFetch('https://api.example.com/v1', {
 		headers: {
 			authorization: 'Bearer {{secret:demoToken|scope=user}}',
 		},
 	})
 	expect(gatewayCalls).toHaveLength(1)
-	// Without a meter stamp, the closed-over outer package id is used.
 	expect(gatewayCalls[0]).toMatchObject({
 		packageId: 'pkg-outer-friction',
 	})

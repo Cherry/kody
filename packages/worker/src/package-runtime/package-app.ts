@@ -41,10 +41,13 @@ import {
 } from './published-bundle-artifacts.ts'
 import { PromiseLruCache } from '#worker/package-registry/published-package-cache.ts'
 import { getEntitySourceById } from '#worker/repo/entity-sources.ts'
+import { timingSafeEqualString } from '@kody-internal/shared/timing-safe.ts'
+import { type FetchGatewayProps } from '#mcp/fetch-gateway.ts'
 import { buildPackageStorageId } from '#worker/storage-ids.ts'
 import {
 	assertStorageRunnerWriteWithinEntitlement,
 	createPackageStorageAccessDeniedMessage,
+	createPackageStorageOwnerOnlyMessage,
 	createStorageBytesEntitlementRunCache,
 	isReadOnlyStorageSqlQuery,
 	storageRunnerRpc,
@@ -66,6 +69,11 @@ import {
 	type PackageWorkflowCreateInput,
 } from './package-workflows.ts'
 import { isPackageSecretAccessUnavailableError } from '#mcp/secrets/package-access.ts'
+import {
+	createPackageSecretRefKey,
+	issuePackageSecretRef,
+} from '#mcp/secrets/package-secret-ref.ts'
+import { buildSecretPlaceholder } from '#mcp/secrets/placeholders.ts'
 import { attestedPackageStamp } from '#worker/credentials/package-stamp.ts'
 import { resolveCredential } from '#worker/credentials/resolve-credential.ts'
 import { newRunCredentialClientBinding } from '#worker/credentials/credential-client-handle.ts'
@@ -76,14 +84,15 @@ import {
 	createCredentialClientRuntimeSource,
 	credentialClientToolNames,
 } from '#worker/mcp/execute-modules/credential-client-source.ts'
-import { createCredentialClientKodyTools } from '#worker/mcp/credential-client-tools.ts'
+import {
+	createCredentialClientKodyTools,
+	resolveCallerCredentialPackageId,
+} from '#worker/mcp/credential-client-tools.ts'
 import { type AdditionalKodyTools } from '#worker/mcp/runtime-helper-manifest.ts'
 import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import {
-	resolveSecretAuthorityPackageId,
 	runWithCurrentSecretAuthority,
 	runWithSecretAuthorityScope,
-	secretAuthorityArgName,
 	secretAuthorityHeaderName,
 	takeSecretAuthorityFromCapabilityArgs,
 } from '#mcp/secrets/secret-authority.ts'
@@ -127,10 +136,22 @@ import { modulesReferenceKodyMcp } from './package-app-mcp-preload.ts'
 const packageAppEntrypointName = 'PackageAppWorker'
 const packageAppRuntimeBindingName = 'KODY_RUNTIME'
 
+function createPackageBindingToken() {
+	const bytes = new Uint8Array(32)
+	crypto.getRandomValues(bytes)
+	return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join(
+		'',
+	)
+}
+
 function createPackageAppWorkerSource(input: {
 	mainModule: string
 	rewriteNullPackagesInvoke: boolean
 	preloadMcpServerNames: boolean
+	/** Package ids that get a trusted per-package binding (the run grant set). */
+	packageBindingIds: Array<string>
+	/** Per-build bridge capability; lives only in this module's private scope. */
+	packageBindingToken: string
 }) {
 	const mcpServerNamesExpr = input.preloadMcpServerNames
 		? 'await runtimeBridge.listMcpServerNames().catch(() => [])'
@@ -159,38 +180,134 @@ const __kodyRuntimeStorage = (() => {
 // from __kodyInitialRuntime at first evaluation — before any
 // __kodyRuntimeStorage.run — so credential stayed undefined forever after
 // createRuntime bound it (#3886). Instead preload runtime inside ALS.run
-// (before the user module) so optional exports see the bound store, and
-// cache the module export for secret-authority stamps. Never trust
-// Symbol.for('kody.getSecretAuthority') alone: package code can seal a
-// forge before runtime installs the real getter.
+// (before the user module) so optional exports see the bound store.
 const __kodyRuntimeModuleSpecifier = ${JSON.stringify(`./${runtimeModulePath}`)};
-let __kodyGetSecretAuthorityFn = null;
-function __kodyReadSecretAuthority() {
-	return typeof __kodyGetSecretAuthorityFn === 'function'
-		? (__kodyGetSecretAuthorityFn() ?? '')
-		: '';
-}
+let __kodyRunWithPackageBindingsFn = null;
 async function __kodyEnsureRuntimeLoaded() {
-	if (typeof __kodyGetSecretAuthorityFn === 'function') return;
+	if (typeof __kodyRunWithPackageBindingsFn === 'function') return;
 	const runtimeModule = await import(__kodyRuntimeModuleSpecifier);
-	__kodyGetSecretAuthorityFn = runtimeModule.__kodyGetSecretAuthority;
+	__kodyRunWithPackageBindingsFn = runtimeModule.__kodyRunWithPackageBindings;
+}
+
+// Trusted per-package bindings (GHSA-5fv3). Package identity is never a
+// header, argument, or ambient value package code can set: each binding
+// calls the runtime bridge with a per-build capability that lives only in
+// this module's private scope, and the host binds the package id it was
+// given here to the bridge / gateway call. The bindings are handed only to
+// the runtime module's private scope. Intrinsics are captured at module
+// load, before any package code has run in this isolate.
+const __kodyReflectApplyCaptured = Reflect.apply;
+const __kodyMapCaptured = Map;
+const __kodyMapSetCaptured = Map.prototype.set;
+const __kodyObjectFreezeCaptured = Object.freeze;
+const __kodyRequestCaptured = Request;
+const __kodyStringTrimCaptured = String.prototype.trim;
+const __kodyPackageBindingToken = ${JSON.stringify(input.packageBindingToken)};
+const __kodyPackageBindingIds = __kodyObjectFreezeCaptured(${JSON.stringify(input.packageBindingIds)});
+let __kodyCapturedRuntimeBridge = null;
+function __kodyCaptureRuntimeBridge(env) {
+	// First capture happens on the first request, before the user module is
+	// imported, so later package code cannot swap the binding it calls.
+	if (__kodyCapturedRuntimeBridge == null) {
+		__kodyCapturedRuntimeBridge = env.${packageAppRuntimeBindingName};
+	}
+	return __kodyCapturedRuntimeBridge;
+}
+function __kodyCreateAppPackageBindings(bridge) {
+	const map = new __kodyMapCaptured();
+	for (let index = 0; index < __kodyPackageBindingIds.length; index += 1) {
+		const packageId = __kodyPackageBindingIds[index];
+		const token = __kodyPackageBindingToken;
+		const boundCapability = async (callInput) =>
+			await bridge.packageBoundCall({
+				token,
+				packageId,
+				op: 'capability',
+				name: callInput?.name,
+				args: callInput?.args ?? {},
+			});
+		let mcp = null;
+		const binding = __kodyObjectFreezeCaptured({
+			// Package-locked MCP servers check the caller's package, so this
+			// package's kody.mcp goes through its own binding too.
+			kodyMcp: () => {
+				if (mcp == null) {
+					mcp = createKodyProxy(
+						{ callCapability: boundCapability },
+						() => bridge.listMcpServerNames().catch(() => []),
+					).mcp;
+				}
+				return mcp;
+			},
+			fetch: async (requestInput, init) =>
+				await bridge.packageBoundFetch(
+					token,
+					packageId,
+					new __kodyRequestCaptured(requestInput, init),
+				),
+			kodyCall: async (name, args) => await boundCapability({ name, args }),
+			// credential() for this package only (GHSA-5fv3).
+			credentialCall: async (name, args) =>
+				await bridge.packageBoundCall({
+					token,
+					packageId,
+					op: 'credentialClient',
+					name,
+					args: args ?? {},
+				}),
+			// packageStorage() for this package only (GHSA-5fv3).
+			packageStorageCall: async (method, args) =>
+				await bridge.packageBoundCall({
+					token,
+					packageId,
+					op: 'packageStorage',
+					name: method,
+					args: args ?? {},
+				}),
+			packageSecretGet: async (alias) => {
+				const result = await bridge.packageBoundCall({
+					token,
+					packageId,
+					op: 'packageSecretGet',
+					alias,
+				});
+				return typeof result?.value === 'string' ? result.value : '';
+			},
+			packageSecretHas: async (alias) => {
+				const result = await bridge.packageBoundCall({
+					token,
+					packageId,
+					op: 'packageSecretHas',
+					alias,
+				});
+				return result?.has === true;
+			},
+		});
+		__kodyReflectApplyCaptured(__kodyMapSetCaptured, map, [packageId, binding]);
+	}
+	return map;
+}
+async function __kodyRunUserCode(env, callback) {
+	await __kodyEnsureRuntimeLoaded();
+	const bindings = __kodyCreateAppPackageBindings(__kodyCaptureRuntimeBridge(env));
+	if (typeof __kodyRunWithPackageBindingsFn !== 'function') {
+		return await callback();
+	}
+	return await __kodyRunWithPackageBindingsFn(bindings, callback);
 }
 
 const __kodyEvaluateFetchPatchedSymbol = Symbol.for('kody.evaluateFetchPatched');
 if (!globalThis[__kodyEvaluateFetchPatchedSymbol]) {
 	const __kodyNativeFetch = globalThis.fetch.bind(globalThis);
 	globalThis.fetch = (input, init) => {
-		const authority = String(__kodyReadSecretAuthority() ?? '').trim();
 		const headers = new Headers(
 			init?.headers ??
 				(input && typeof input === 'object' && 'headers' in input
 					? input.headers
 					: undefined),
 		);
+		// Identity never rides on a header (GHSA-5fv3); strip any forgery.
 		headers.delete(${JSON.stringify(secretAuthorityHeaderName)});
-		if (authority) {
-			headers.set(${JSON.stringify(secretAuthorityHeaderName)}, authority);
-		}
 		// Leave x-kody-credential-client alone: globalOutbound KodyFetchGateway
 		// matches it against the run binding on its props and places the
 		// credential. Stripping it would send an unauthenticated upstream
@@ -322,23 +439,11 @@ function createKodyProxy(runtimeBridge, mcpServerNamesOrLoader) {
 				};
 			},
 		});
-	function attachSecretAuthorityArgs(args) {
-		const authority = String(__kodyReadSecretAuthority() ?? '').trim();
-		if (args == null || typeof args !== 'object' || Array.isArray(args)) {
-			return args;
-		}
-		const next = { ...args };
-		delete next['__kodySecretAuthorityPackageId'];
-		if (authority) {
-			next['__kodySecretAuthorityPackageId'] = authority;
-		}
-		return next;
-	}
 	const mcp = createMcpServerNamespaceProxy((serverName) =>
 		createOpenNamespaceProxy((toolName) => async (args = {}) =>
 			await runtimeBridge.callCapability({
 				name: \`mcp:\${serverName}:\${toolName}\`,
-				args: attachSecretAuthorityArgs(args),
+				args,
 			}),
 		),
 	);
@@ -358,7 +463,7 @@ function createKodyProxy(runtimeBridge, mcpServerNamesOrLoader) {
 			return async (args = {}) =>
 				await runtimeBridge.callCapability({
 					name: property,
-					args: attachSecretAuthorityArgs(args),
+					args,
 				});
 		},
 		has(_target, property) {
@@ -407,18 +512,13 @@ function createRealtimeProxy(runtimeBridge) {
 }
 
 function createPackageSecretsProxy(runtimeBridge) {
-	const secretArgs = (alias) => {
-		const authority = String(__kodyReadSecretAuthority() ?? '').trim();
-		const args = { alias };
-		if (authority) {
-			args[${JSON.stringify(secretAuthorityArgName)}] = authority;
-		}
-		return args;
-	};
+	// Run-identity secrets only; package-bound secrets go through the
+	// trusted per-package binding. Alias trimmed with a captured intrinsic.
+	const secretArgs = (alias) => ({ alias });
 	return {
 		get: async (alias) => {
 			const normalizedAlias =
-				typeof alias === 'string' ? alias.trim() : ''
+				typeof alias === 'string' ? __kodyReflectApplyCaptured(__kodyStringTrimCaptured, alias, []) : ''
 			if (!normalizedAlias) {
 				throw new Error('packageSecrets.get requires a non-empty alias.')
 			}
@@ -436,7 +536,7 @@ function createPackageSecretsProxy(runtimeBridge) {
 		},
 		has: async (alias) => {
 			const normalizedAlias =
-				typeof alias === 'string' ? alias.trim() : ''
+				typeof alias === 'string' ? __kodyReflectApplyCaptured(__kodyStringTrimCaptured, alias, []) : ''
 			if (!normalizedAlias) {
 				throw new Error('packageSecrets.has requires a non-empty alias.')
 			}
@@ -641,14 +741,13 @@ function createPackageAppEnv(env, userModule) {
 
 ${createCredentialClientRuntimeSource()}
 
-function createCredentialRuntime(runtimeBridge, packageId) {
+// \`call\` is a package's trusted binding call (GHSA-5fv3). Without one the
+// public bridge acts as the app package, so no package id is sent.
+function createCredentialRuntime(runtimeBridge, call) {
 	return __kodyCreateCredentialRuntime((name, args) =>
-		runtimeBridge.credentialClientCall({
-			name,
-			args: packageId
-				? { ...(args ?? {}), packageId }
-				: (args ?? {}),
-		}),
+		typeof call === 'function'
+			? call(name, args ?? {})
+			: runtimeBridge.credentialClientCall({ name, args: args ?? {} }),
 	);
 }
 
@@ -717,8 +816,8 @@ function createRuntime(runtimeBridge, packageContext, mcpServerNamesOrLoader) {
 		packageSecrets,
 		credential: credentialRuntime.credential,
 		credentials: credentialRuntime.credentials,
-		__kodyCredentialRuntimeFor: (boundPackageId) =>
-			createCredentialRuntime(runtimeBridge, boundPackageId),
+		__kodyCredentialRuntimeFor: (_boundPackageId, call) =>
+			createCredentialRuntime(runtimeBridge, call),
 		workflows: createWorkflowsProxy(runtimeBridge),
 		packages: null,
 		events: createEventsProxy(runtimeBridge),
@@ -929,8 +1028,7 @@ export class ${packageAppEntrypointName} extends WorkerEntrypoint {
 		);
 		try {
 			consoleCapture.install();
-			const response = await __kodyRuntimeStorage.run(runtime, async () => {
-				await __kodyEnsureRuntimeLoaded();
+			const response = await __kodyRuntimeStorage.run(runtime, async () => await __kodyRunUserCode(this.env, async () => {
 				const userModule = await import(${JSON.stringify(`./${input.mainModule}`)});
 				const runtimeEnv = createPackageAppEnv(this.env, userModule);
 				const candidate = userModule.default ?? userModule;
@@ -944,7 +1042,7 @@ export class ${packageAppEntrypointName} extends WorkerEntrypoint {
 					throw new Error('Package apps must default export a fetch handler or an object with fetch().');
 				}
 				return await fetchHandler(request, runtimeEnv, this.ctx);
-			});
+			}));
 			// Authors (or proxied upstreams) must not set the internal throw
 			// marker; only the catch path below may attach it.
 			let outgoing = withoutAuthorRuntimeErrorHeader(response);
@@ -1009,8 +1107,7 @@ export class ${packageAppEntrypointName} extends WorkerEntrypoint {
 		);
 		try {
 			consoleCapture.install();
-			const result = await __kodyRuntimeStorage.run(runtime, async () => {
-				await __kodyEnsureRuntimeLoaded();
+			const result = await __kodyRuntimeStorage.run(runtime, async () => await __kodyRunUserCode(this.env, async () => {
 				const userModule = await import(${JSON.stringify(`./${input.mainModule}`)});
 				const runtimeEnv = createPackageAppEnv(this.env, userModule);
 				const resolved = resolveRealtimeHandler(userModule, payload?.facet);
@@ -1034,7 +1131,7 @@ export class ${packageAppEntrypointName} extends WorkerEntrypoint {
 					throw new Error(\`Package app facet "\${buildFacetName(payload?.facet)}" must implement onRealtimeEvent().\`);
 				}
 				return await instance.onRealtimeEvent(payload, runtimeEnv, this.ctx);
-			});
+			}));
 			finishRuntimeRun(runtimeBridge, this.ctx, {
 				run: runtimeRun,
 				status: 'success',
@@ -1078,6 +1175,16 @@ type PackageAppRuntimeBridgeProps = {
 	 * across WorkerEntrypoint RPC invocations.
 	 */
 	credentialClientBinding: string
+	/** Per-run HMAC key for package-scoped secret placeholders (GHSA-5fv3). */
+	packageSecretRefKey: string
+	/**
+	 * Per-build capability held only in the app wrapper's module scope
+	 * (GHSA-5fv3). `packageBoundCall` / `packageBoundFetch` act as a granted
+	 * package only when called with it; package code cannot read it.
+	 */
+	packageBindingToken: string
+	/** Gateway props for per-package bound fetches (`boundPackageId` added per call). */
+	gatewayProps: FetchGatewayProps | null
 }
 
 function redactRunRecordLogs(
@@ -1109,7 +1216,10 @@ export class PackageAppRuntimeBridge extends WorkerEntrypoint<
 	PackageAppRuntimeBridgeProps
 > {
 	private packageEventTools: Promise<PackageEventTools> | null = null
-	private credentialClientTools: Promise<AdditionalKodyTools> | null = null
+	private readonly credentialClientTools = new Map<
+		string,
+		Promise<AdditionalKodyTools>
+	>()
 	private readonly secretRedactor: ExecutionSecretRedactor =
 		createExecutionSecretRedactor()
 
@@ -1207,16 +1317,41 @@ export class PackageAppRuntimeBridge extends WorkerEntrypoint<
 		return normalizedPackageId
 	}
 
-	private resolvePackageSecretAuthorityPackageId(input: unknown) {
-		const { requestedPackageId } = takeSecretAuthorityFromCapabilityArgs([
-			input ?? {},
-		])
-		const grantedPackageIds = new Set(this.ctx.props.packageStorageGrantIds)
-		const authorityPackageId = resolveSecretAuthorityPackageId({
-			requestedPackageId,
-			grantedPackageIds,
-			runPackageId: this.ctx.props.packageId,
-		})
+	/**
+	 * Bucket owner for a `packageStorage*` call (GHSA-5fv3). The grant set
+	 * says which buckets this run may touch; only a trusted per-package
+	 * binding (`boundPackageId`, set by `packageBoundCall` after the
+	 * capability check) says whose code is calling. Unbound calls act as the
+	 * run package, so a caller-named granted id cannot reach another
+	 * package's bucket.
+	 */
+	private resolvePackageStorageOwner(
+		requestedPackageId: unknown,
+		boundPackageId: string | null,
+	) {
+		const packageId = this.assertPackageStorageGranted(
+			typeof requestedPackageId === 'string' ? requestedPackageId : '',
+		)
+		const ownerPackageId =
+			boundPackageId?.trim() || this.ctx.props.packageId.trim() || null
+		if (packageId !== ownerPackageId) {
+			throw new Error(createPackageStorageOwnerOnlyMessage(packageId))
+		}
+		return packageId
+	}
+
+	/**
+	 * Secret authority for a bridge call. Only a trusted per-package binding
+	 * (`boundPackageId`, set by `packageBoundCall` after the capability
+	 * check) selects a package; otherwise the run package. Caller-supplied
+	 * fields (`packageId`, `__kodySecretAuthorityPackageId`) are ignored
+	 * (GHSA-5fv3).
+	 */
+	private resolvePackageSecretAuthorityPackageId(
+		boundPackageId: string | null,
+	) {
+		const authorityPackageId =
+			boundPackageId?.trim() || this.ctx.props.packageId.trim() || null
 		if (!authorityPackageId) {
 			throw new Error(
 				'packageSecrets requires a matching server-side package runtime context.',
@@ -1310,10 +1445,105 @@ export class PackageAppRuntimeBridge extends WorkerEntrypoint<
 	}
 
 	async callCapability(input: { name: string; args?: unknown }) {
+		return await this.callCapabilityAs(null, input)
+	}
+
+	/**
+	 * Trusted per-package binding entry (GHSA-5fv3). The app wrapper calls it
+	 * with the per-build capability it alone holds; the package id it names
+	 * must be in the run grant set. Package code reaching `env.KODY_RUNTIME`
+	 * cannot present the capability, so it can only act as the run package.
+	 */
+	async packageBoundCall(input: {
+		token: string
+		packageId: string
+		op:
+			| 'capability'
+			| 'packageSecretGet'
+			| 'packageSecretHas'
+			| 'packageStorage'
+			| 'credentialClient'
+		name?: string
+		args?: unknown
+		alias?: string
+	}) {
+		const packageId = await this.assertPackageBindingCapability(
+			input?.token,
+			input?.packageId,
+		)
+		switch (input.op) {
+			case 'capability':
+				return await this.callCapabilityAs(packageId, {
+					name: String(input.name ?? ''),
+					args: input.args,
+				})
+			case 'packageSecretGet':
+				return await this.packageSecretGetAs(
+					packageId,
+					String(input.alias ?? ''),
+				)
+			case 'packageSecretHas':
+				return await this.packageSecretHasAs(
+					packageId,
+					String(input.alias ?? ''),
+				)
+			case 'packageStorage':
+				return await this.packageStorageCallAs(
+					packageId,
+					String(input.name ?? ''),
+					input.args,
+				)
+			case 'credentialClient':
+				return await this.credentialClientCallAs(packageId, {
+					name: String(input.name ?? ''),
+					args: input.args,
+				})
+			default:
+				throw new Error('Unknown package binding operation.')
+		}
+	}
+
+	async packageBoundFetch(token: string, packageId: string, request: Request) {
+		const boundPackageId = await this.assertPackageBindingCapability(
+			token,
+			packageId,
+		)
+		const gatewayProps = this.ctx.props.gatewayProps
+		if (!gatewayProps || !workerExports?.KodyFetchGateway) {
+			return await fetch(request)
+		}
+		return await workerExports
+			.KodyFetchGateway({ props: { ...gatewayProps, boundPackageId } })
+			.fetch(request)
+	}
+
+	private async assertPackageBindingCapability(
+		token: unknown,
+		packageId: unknown,
+	) {
+		const expected = this.ctx.props.packageBindingToken
+		if (
+			typeof token !== 'string' ||
+			!expected ||
+			!(await timingSafeEqualString(token, expected))
+		) {
+			throw new Error('Package binding capability is invalid.')
+		}
+		const normalized = typeof packageId === 'string' ? packageId.trim() : ''
+		if (!normalized) {
+			throw new Error('Package binding requires a package id.')
+		}
+		return this.assertPackageStorageGranted(normalized)
+	}
+
+	private async callCapabilityAs(
+		boundPackageId: string | null,
+		input: { name: string; args?: unknown },
+	) {
 		const name = input.name.trim()
-		const { args, requestedPackageId } = takeSecretAuthorityFromCapabilityArgs([
-			input.args ?? {},
-		])
+		// Discard any caller-supplied authority field (GHSA-5fv3).
+		const { args } = takeSecretAuthorityFromCapabilityArgs([input.args ?? {}])
+		const requestedPackageId = boundPackageId
 		const callerContext = await this.createCallerContext(null)
 		const { capabilityMap } = await getCapabilityRegistryForContext({
 			env: this.env,
@@ -1446,7 +1676,99 @@ export class PackageAppRuntimeBridge extends WorkerEntrypoint<
 	}
 
 	async packageStorageGet(input: { packageId: string; key: string }) {
-		const packageId = this.assertPackageStorageGranted(input.packageId)
+		return await this.packageStorageGetAs(null, input)
+	}
+
+	async packageStorageList(input: {
+		packageId: string
+		prefix?: string | null
+		pageSize?: number
+		startAfter?: string | null
+	}) {
+		return await this.packageStorageListAs(null, input)
+	}
+
+	async packageStorageSql(input: {
+		packageId: string
+		query: string
+		params?: Array<unknown>
+		writable?: boolean
+	}) {
+		return await this.packageStorageSqlAs(null, input)
+	}
+
+	async packageStorageSet(input: {
+		packageId: string
+		key: string
+		value: unknown
+	}) {
+		return await this.packageStorageSetAs(null, input)
+	}
+
+	async packageStorageDelete(input: { packageId: string; key: string }) {
+		return await this.packageStorageDeleteAs(null, input)
+	}
+
+	async packageStorageClear(input: { packageId: string }) {
+		return await this.packageStorageClearAs(null, input)
+	}
+
+	/**
+	 * Bound `packageStorage()` call from the app wrapper's per-package
+	 * binding (GHSA-5fv3). The bucket is the bound package's own; any
+	 * `packageId` in `args` must match it.
+	 */
+	private async packageStorageCallAs(
+		boundPackageId: string,
+		method: string,
+		args: unknown,
+	) {
+		const payload = (
+			args !== null && typeof args === 'object' && !Array.isArray(args)
+				? args
+				: {}
+		) as Record<string, unknown>
+		const packageId =
+			typeof payload['packageId'] === 'string'
+				? payload['packageId']
+				: boundPackageId
+		const input = { ...payload, packageId } as {
+			packageId: string
+			key: string
+			value: unknown
+			query: string
+			params?: Array<unknown>
+			writable?: boolean
+			prefix?: string | null
+			pageSize?: number
+			startAfter?: string | null
+		}
+		switch (method) {
+			case 'packageStorageGet':
+				return await this.packageStorageGetAs(boundPackageId, input)
+			case 'packageStorageList':
+				return await this.packageStorageListAs(boundPackageId, input)
+			case 'packageStorageSql':
+				return await this.packageStorageSqlAs(boundPackageId, input)
+			case 'packageStorageSet':
+				return await this.packageStorageSetAs(boundPackageId, input)
+			case 'packageStorageDelete':
+				return await this.packageStorageDeleteAs(boundPackageId, input)
+			case 'packageStorageClear':
+				return await this.packageStorageClearAs(boundPackageId, input)
+			default:
+				throw new Error('Unknown package storage operation.')
+		}
+	}
+
+	private async packageStorageGetAs(
+		boundPackageId: string | null,
+		input: { packageId: string; key: string },
+	) {
+		const packageId = this.resolvePackageStorageOwner(
+			input.packageId,
+			boundPackageId,
+		)
 		// Provenance-granted package: buckets intentionally bypass the app
 		// namespace lock on raw storage* (assertAppOwnedStorageId).
 		return await this.getStorageRunner(
@@ -1456,13 +1778,19 @@ export class PackageAppRuntimeBridge extends WorkerEntrypoint<
 		})
 	}
 
-	async packageStorageList(input: {
-		packageId: string
-		prefix?: string | null
-		pageSize?: number
-		startAfter?: string | null
-	}) {
-		const packageId = this.assertPackageStorageGranted(input.packageId)
+	private async packageStorageListAs(
+		boundPackageId: string | null,
+		input: {
+			packageId: string
+			prefix?: string | null
+			pageSize?: number
+			startAfter?: string | null
+		},
+	) {
+		const packageId = this.resolvePackageStorageOwner(
+			input.packageId,
+			boundPackageId,
+		)
 		return await this.getStorageRunner(
 			buildPackageStorageId(packageId),
 		).listValues({
@@ -1472,13 +1800,19 @@ export class PackageAppRuntimeBridge extends WorkerEntrypoint<
 		})
 	}
 
-	async packageStorageSql(input: {
-		packageId: string
-		query: string
-		params?: Array<unknown>
-		writable?: boolean
-	}) {
-		const packageId = this.assertPackageStorageGranted(input.packageId)
+	private async packageStorageSqlAs(
+		boundPackageId: string | null,
+		input: {
+			packageId: string
+			query: string
+			params?: Array<unknown>
+			writable?: boolean
+		},
+	) {
+		const packageId = this.resolvePackageStorageOwner(
+			input.packageId,
+			boundPackageId,
+		)
 		return await this.sqlQueryWithEntitlement({
 			storageId: buildPackageStorageId(packageId),
 			query: input.query,
@@ -1487,12 +1821,18 @@ export class PackageAppRuntimeBridge extends WorkerEntrypoint<
 		})
 	}
 
-	async packageStorageSet(input: {
-		packageId: string
-		key: string
-		value: unknown
-	}) {
-		const packageId = this.assertPackageStorageGranted(input.packageId)
+	private async packageStorageSetAs(
+		boundPackageId: string | null,
+		input: {
+			packageId: string
+			key: string
+			value: unknown
+		},
+	) {
+		const packageId = this.resolvePackageStorageOwner(
+			input.packageId,
+			boundPackageId,
+		)
 		return await this.setValueWithEntitlement({
 			storageId: buildPackageStorageId(packageId),
 			key: input.key,
@@ -1500,8 +1840,14 @@ export class PackageAppRuntimeBridge extends WorkerEntrypoint<
 		})
 	}
 
-	async packageStorageDelete(input: { packageId: string; key: string }) {
-		const packageId = this.assertPackageStorageGranted(input.packageId)
+	private async packageStorageDeleteAs(
+		boundPackageId: string | null,
+		input: { packageId: string; key: string },
+	) {
+		const packageId = this.resolvePackageStorageOwner(
+			input.packageId,
+			boundPackageId,
+		)
 		return await this.getStorageRunner(
 			buildPackageStorageId(packageId),
 		).deleteValue({
@@ -1509,8 +1855,14 @@ export class PackageAppRuntimeBridge extends WorkerEntrypoint<
 		})
 	}
 
-	async packageStorageClear(input: { packageId: string }) {
-		const packageId = this.assertPackageStorageGranted(input.packageId)
+	private async packageStorageClearAs(
+		boundPackageId: string | null,
+		input: { packageId: string },
+	) {
+		const packageId = this.resolvePackageStorageOwner(
+			input.packageId,
+			boundPackageId,
+		)
 		return await this.getStorageRunner(
 			buildPackageStorageId(packageId),
 		).clearStorage()
@@ -1542,10 +1894,12 @@ export class PackageAppRuntimeBridge extends WorkerEntrypoint<
 
 	private async resolvePackageSecretMount(input: {
 		alias: string
-		packageId?: string
+		boundPackageId: string | null
 		access?: 'presence' | 'value'
 	}) {
-		const packageId = this.resolvePackageSecretAuthorityPackageId(input)
+		const packageId = this.resolvePackageSecretAuthorityPackageId(
+			input.boundPackageId,
+		)
 		const callerContext = await this.createCallerContext(
 			this.ctx.props.packageId,
 		)
@@ -1555,6 +1909,7 @@ export class PackageAppRuntimeBridge extends WorkerEntrypoint<
 			actor: callerContext.request,
 			packageStamp: attestedPackageStamp(packageId),
 			baseUrl: callerContext.baseUrl,
+			runContextPackageId: this.ctx.props.packageId,
 			credential: {
 				use: 'package-secret-mount',
 				alias: input.alias,
@@ -1564,18 +1919,54 @@ export class PackageAppRuntimeBridge extends WorkerEntrypoint<
 		})
 	}
 
-	async packageSecretGet(input: { alias: string; packageId?: string }) {
-		const resolved = await this.resolvePackageSecretMount(input)
-		// Opaque placeholder string only — never track or return plaintext.
-		return {
-			value: resolved.ref,
-		}
+	/** Run-package secrets only; caller-supplied ids are ignored (GHSA-5fv3). */
+	async packageSecretGet(input: { alias: string }) {
+		return await this.packageSecretGetAs(null, String(input?.alias ?? ''))
 	}
 
-	async packageSecretHas(input: { alias: string; packageId?: string }) {
+	private async packageSecretGetAs(
+		boundPackageId: string | null,
+		alias: string,
+	) {
+		const input = { alias }
+		const resolved = await this.resolvePackageSecretMount({
+			alias,
+			boundPackageId,
+		})
+		// Opaque placeholder string only — never track or return plaintext.
+		let value = resolved.ref
+		if (
+			resolved.scope === 'package' &&
+			resolved.packageId &&
+			this.ctx.props.packageSecretRefKey
+		) {
+			const issued = await issuePackageSecretRef({
+				refKey: this.ctx.props.packageSecretRefKey,
+				packageId: resolved.packageId,
+				alias: resolved.alias ?? input.alias,
+			})
+			value = buildSecretPlaceholder({
+				name: resolved.name,
+				scope: 'package',
+				ref: issued,
+			})
+		}
+		return { value }
+	}
+
+	/** Run-package secrets only; caller-supplied ids are ignored (GHSA-5fv3). */
+	async packageSecretHas(input: { alias: string }) {
+		return await this.packageSecretHasAs(null, String(input?.alias ?? ''))
+	}
+
+	private async packageSecretHasAs(
+		boundPackageId: string | null,
+		alias: string,
+	) {
 		try {
 			await this.resolvePackageSecretMount({
-				...input,
+				alias,
+				boundPackageId,
 				access: 'presence',
 			})
 			return {
@@ -1672,12 +2063,19 @@ export class PackageAppRuntimeBridge extends WorkerEntrypoint<
 		return await tools.dispatch(input)
 	}
 
-	private async getCredentialClientTools() {
-		if (this.credentialClientTools) return await this.credentialClientTools
+	/**
+	 * Credential client tools acting as one package (GHSA-5fv3): the package
+	 * `packageBoundCall` bound after its capability check, or the app package
+	 * for the public bridge. A sandbox-named package id never selects another
+	 * package's needs or bound Keys.
+	 */
+	private async getCredentialClientTools(boundPackageId: string | null = null) {
+		const owner = boundPackageId ?? this.ctx.props.packageId
+		const cached = this.credentialClientTools.get(owner)
+		if (cached) return await cached
 		const binding = this.ctx.props.credentialClientBinding
-		this.credentialClientTools = (async () => {
+		const tools = (async () => {
 			const callerContext = await this.createCallerContext(null)
-			const grantedPackageIds = new Set(this.ctx.props.packageStorageGrantIds)
 			let runNeeds: Promise<ReadonlyMap<string, CredentialNeed>> | null = null
 			return createCredentialClientKodyTools({
 				env: this.env,
@@ -1685,9 +2083,10 @@ export class PackageAppRuntimeBridge extends WorkerEntrypoint<
 				options: {
 					binding,
 					resolvePackageId: async (requested) =>
-						typeof requested === 'string' && grantedPackageIds.has(requested)
-							? requested
-							: this.ctx.props.packageId,
+						resolveCallerCredentialPackageId({
+							requested,
+							callerPackageId: owner,
+						}),
 					// Needs load for anonymous visitors too: an opted-in need is the
 					// only way they reach a credential.
 					runNeeds: () => {
@@ -1705,16 +2104,24 @@ export class PackageAppRuntimeBridge extends WorkerEntrypoint<
 				},
 			})
 		})()
-		return await this.credentialClientTools
+		this.credentialClientTools.set(owner, tools)
+		return await tools
 	}
 
 	async credentialClientCall(input: { name: string; args?: unknown }) {
-		const name = input.name.trim()
+		return await this.credentialClientCallAs(null, input)
+	}
+
+	private async credentialClientCallAs(
+		boundPackageId: string | null,
+		input: { name: string; args?: unknown },
+	) {
+		const name = String(input.name ?? '').trim()
 		const allowed = new Set<string>(Object.values(credentialClientToolNames))
 		if (!allowed.has(name)) {
 			throw new Error(`Unknown credential client tool "${name}".`)
 		}
-		const tools = await this.getCredentialClientTools()
+		const tools = await this.getCredentialClientTools(boundPackageId)
 		const tool = tools[name]
 		if (typeof tool !== 'function') {
 			throw new Error(`Credential client tool "${name}" is not available.`)
@@ -2190,10 +2597,15 @@ async function buildPackageAppWorkerOptionsUncached(input: {
 			dynamicDependencyPackageIds,
 		}),
 	]
+	// Per-build capability for the trusted per-package bindings (GHSA-5fv3).
+	// Embedded only in the wrapper's module scope and the bridge props.
+	const packageBindingToken = createPackageBindingToken()
 	const modules = {
 		...hydratedModules,
 		[mainModule]: createPackageAppWorkerSource({
 			mainModule: bundled.mainModule,
+			packageBindingIds: packageStorageGrantIds,
+			packageBindingToken,
 			rewriteNullPackagesInvoke:
 				modulesContainUnboundPackagesInvokeAccess(hydratedModules),
 			preloadMcpServerNames: modulesReferenceKodyMcp(bundled.modules),
@@ -2204,6 +2616,27 @@ async function buildPackageAppWorkerOptionsUncached(input: {
 	// and sign share the same run binding across RPC invocations, and the
 	// fetch gateway can place credential().fetch handles.
 	const credentialClientBinding = newRunCredentialClientBinding()
+	const packageSecretRefKey = createPackageSecretRefKey()
+	const gatewayProps: FetchGatewayProps = {
+		baseUrl: input.baseUrl,
+		userId: input.userId,
+		email: input.runtime.callerContext.user?.email ?? null,
+		request: input.runtime.callerContext.request,
+		storageContext: {
+			sessionId: null,
+			appId: input.savedPackage.id,
+			packageId: input.savedPackage.id,
+			storageId: null,
+		},
+		grantedSecretAuthorityPackageIds: packageStorageGrantIds,
+		credentialClientBinding,
+		packageSecretRefKey,
+		ownerCredentialScope: packageAppOwnerCredentialScope({
+			userId: input.userId,
+			packageId: input.savedPackage.id,
+			publishedCommit: input.savedPackage.publishedCommit,
+		}),
+	}
 	return {
 		...createDynamicWorkerCompatibilityOptions(),
 		mainModule,
@@ -2227,6 +2660,9 @@ async function buildPackageAppWorkerOptionsUncached(input: {
 					publishedCommit: input.savedPackage.publishedCommit,
 					packageStorageGrantIds,
 					credentialClientBinding,
+					packageSecretRefKey,
+					packageBindingToken,
+					gatewayProps,
 				},
 			}),
 			__kodyPackageContext: {
@@ -2239,27 +2675,7 @@ async function buildPackageAppWorkerOptionsUncached(input: {
 			},
 		},
 		globalOutbound: workerExports?.KodyFetchGateway
-			? workerExports.KodyFetchGateway({
-					props: {
-						baseUrl: input.baseUrl,
-						userId: input.userId,
-						email: input.runtime.callerContext.user?.email ?? null,
-						request: input.runtime.callerContext.request,
-						storageContext: {
-							sessionId: null,
-							appId: input.savedPackage.id,
-							packageId: input.savedPackage.id,
-							storageId: null,
-						},
-						grantedSecretAuthorityPackageIds: packageStorageGrantIds,
-						credentialClientBinding,
-						ownerCredentialScope: packageAppOwnerCredentialScope({
-							userId: input.userId,
-							packageId: input.savedPackage.id,
-							publishedCommit: input.savedPackage.publishedCommit,
-						}),
-					},
-				})
+			? workerExports.KodyFetchGateway({ props: gatewayProps })
 			: null,
 	}
 }

@@ -66,20 +66,27 @@ export {
 	events,
 };
 
-// Stamp ALS for statically imported package exports (same contract as cloud
-// \`__kodyMeterStaticPackageExport\`). Nested published bundles keep one ambient
-// \`fetch\` binding for the outer module path; the meter re-enters this ALS so
-// gatewayFetch hops stamp the callee package, not the inlining consumer
-// (kody#2876). Module-local ALS — do not hang the runner on Symbol.for.
-const __kodySecretAuthorityAls = new AsyncLocalStorage();
+// Secret authority is a synchronous, single-use slot opened only by
+// module-bound fetch / packageSecrets wrappers around the direct call into
+// the host dispatcher — never an ambient ALS scope (GHSA-5fv3). Same
+// contract as cloud runtime-source-modules. Intrinsics captured at shim
+// evaluation (before package code).
 const __kodyGetSecretAuthoritySymbol = Symbol.for("kody.getSecretAuthority");
-const __kodyAsyncFunctionPrototype = Object.getPrototypeOf(async function () {});
+const __kodyReflectApply = Reflect.apply;
+let __kodySecretAuthoritySlot = null;
 function __kodyReadSecretAuthority() {
-	const current = __kodySecretAuthorityAls.getStore();
+	const current = __kodySecretAuthoritySlot;
+	__kodySecretAuthoritySlot = null;
 	return typeof current === "string" && current.trim() ? current.trim() : null;
 }
 function __kodyRunWithSecretAuthority(packageId, callback) {
-	return __kodySecretAuthorityAls.run(packageId, callback);
+	const previous = __kodySecretAuthoritySlot;
+	__kodySecretAuthoritySlot = packageId;
+	try {
+		return callback();
+	} finally {
+		__kodySecretAuthoritySlot = previous;
+	}
 }
 {
 	const __globalAny = /** @type {any} */ (globalThis);
@@ -416,28 +423,10 @@ async function __kodyCreateAuthenticatedFetch(providerName, packageId) {
  * closed-over id so nested inlined callees stamp as themselves (kody#2876).
  */
 function __kodyResolveGatewayPackageId(fallbackPackageId) {
-	// Prefer meter ALS over the module-path closed-over id so nested inlined
-	// callees stamp as themselves (kody#2876). Prefer the module-local reader
-	// when present (same evaluation as the meter); fall back to Symbol.for
-	// for host readers. \`typeof\` on an undeclared binding is safe so
-	// gateway-only unit-test slices still evaluate.
-	let stamped = null;
-	if (typeof __kodyReadSecretAuthority === "function") {
-		const current = __kodyReadSecretAuthority();
-		if (typeof current === "string" && current.trim()) {
-			stamped = current.trim();
-		}
-	}
-	if (!stamped) {
-		const getter = globalThis[Symbol.for("kody.getSecretAuthority")];
-		if (typeof getter === "function") {
-			const current = getter();
-			if (typeof current === "string" && current.trim()) {
-				stamped = current.trim();
-			}
-		}
-	}
-	if (stamped) return stamped;
+	// Module-bound identity only (GHSA-5fv3). The sync authority slot is
+	// single-use for host take; do not prefer it over the closed-over
+	// package id here — bound fetch already passes its packageId. Peeking
+	// via take would clear a slot opened by a nested bound helper.
 	const fallback =
 		typeof fallbackPackageId === "string" ? fallbackPackageId.trim() : "";
 	return fallback || null;
@@ -445,11 +434,10 @@ function __kodyResolveGatewayPackageId(fallbackPackageId) {
 
 export function __kodyCreatePackageBoundGatewayFetch(packageId) {
 	return async function gatewayFetch(input, init) {
-		// Capture stamp synchronously before any await (same discipline as
-		// cloud sandbox fetch): ALS must be read while the meter wrapper is
-		// still active on this call stack.
 		const authority = __kodyResolveGatewayPackageId(packageId);
-		return __kodyGatewayFetchCall(input, init, authority);
+		return __kodyRunWithSecretAuthority(authority, () =>
+			__kodyGatewayFetchCall(input, init, authority),
+		);
 	};
 }
 
@@ -1092,22 +1080,26 @@ export function __kodyCreatePackageBoundSecrets(packageId) {
 			if (!normalizedAlias) {
 				throw new Error("packageSecrets.get requires a non-empty alias.");
 			}
-			const result = await kody.packageSecretGet({
-				alias: normalizedAlias,
-				__kodySecretAuthorityPackageId: packageId,
+			return __kodyRunWithSecretAuthority(packageId, async () => {
+				const result = await kody.packageSecretGet({
+					alias: normalizedAlias,
+					__kodySecretAuthorityPackageId: packageId,
+				});
+				return typeof result?.value === "string" ? result.value : "";
 			});
-			return typeof result?.value === "string" ? result.value : "";
 		},
 		has: async (alias) => {
 			const normalizedAlias = typeof alias === "string" ? alias.trim() : "";
 			if (!normalizedAlias) {
 				throw new Error("packageSecrets.has requires a non-empty alias.");
 			}
-			const result = await kody.packageSecretHas({
-				alias: normalizedAlias,
-				__kodySecretAuthorityPackageId: packageId,
+			return __kodyRunWithSecretAuthority(packageId, async () => {
+				const result = await kody.packageSecretHas({
+					alias: normalizedAlias,
+					__kodySecretAuthorityPackageId: packageId,
+				});
+				return result?.has === true;
 			});
-			return result?.has === true;
 		},
 	};
 }
@@ -1156,37 +1148,13 @@ const __kodyLocalRuntimeStorageViewSymbol = Symbol.for(
 }
 
 /**
- * Local counterpart of cloud \`__kodyMeterStaticPackageExport\`: wrap function
- * exports so their bodies run under the callee package stamp ALS. Usage
- * metering stays cloud-only; this wrapper exists so nested inlined packages
- * stamp gatewayFetch / secret authority as the imported package (kody#2876).
+ * Local counterpart of cloud \`__kodyMeterStaticPackageExport\`: metering only.
+ * No secret authority is entered around the call (GHSA-5fv3). Nested package
+ * identity for fetch/secrets comes from module-bound helpers, not ambient ALS.
  */
 export function __kodyMeterStaticPackageExport(packageId, exportValue) {
 	if (typeof exportValue !== "function") return exportValue;
-	const stampedId =
-		typeof packageId === "string" && packageId.trim() ? packageId.trim() : "";
-	if (!stampedId) return exportValue;
-	return new Proxy(exportValue, {
-		construct(target, argumentsList, newTarget) {
-			return __kodyRunWithSecretAuthority(stampedId, () =>
-				Reflect.construct(target, argumentsList, newTarget),
-			);
-		},
-		apply(target, thisArg, argumentsList) {
-			// Async callees must be awaited inside ALS.run so the stamp
-			// survives awaits in the callee body (workerd loses ALS when the
-			// sync run() callback only *returns* a Promise). Key off the
-			// intrinsic AsyncFunction prototype — never target.constructor.
-			if (Object.getPrototypeOf(target) === __kodyAsyncFunctionPrototype) {
-				return __kodyRunWithSecretAuthority(stampedId, async () =>
-					await Reflect.apply(target, thisArg, argumentsList),
-				);
-			}
-			return __kodyRunWithSecretAuthority(stampedId, () =>
-				Reflect.apply(target, thisArg, argumentsList),
-			);
-		},
-	});
+	return exportValue;
 }
 
 export function packageStorage() {

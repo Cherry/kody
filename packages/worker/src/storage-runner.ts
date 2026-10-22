@@ -1,3 +1,4 @@
+import { getSecretAuthorityScope } from '#mcp/secrets/secret-authority.ts'
 import * as Sentry from '@sentry/cloudflare'
 import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import { DurableObject } from 'cloudflare:workers'
@@ -1628,6 +1629,19 @@ export function createStorageKodyTools(input: {
 	}
 }
 
+/**
+ * Denial for a granted bucket reached by code that is not the bucket's own
+ * package (GHSA-5fv3). The grant set says which buckets the run may touch;
+ * the trusted per-package binding says whose code is calling.
+ */
+export function createPackageStorageOwnerOnlyMessage(packageId: string) {
+	return (
+		`packageStorage() for package "${packageId}" is only available to that package's own code. ` +
+		'Importer code and other packages in the same run cannot read or write it by naming its package id; ' +
+		'call an export of that package so its own packageStorage() does the reading and writing.'
+	)
+}
+
 export function createPackageStorageAccessDeniedMessage(packageId: string) {
 	return (
 		`packageStorage() cannot access the storage of package "${packageId}" from this execution context. ` +
@@ -1663,8 +1677,15 @@ export function createPackageStorageKodyTools(input: {
 	email?: string | null
 	grantedPackageIds: ReadonlySet<string>
 	writable?: boolean
+	/**
+	 * The run's own package (null for ad hoc execute). Calls through the
+	 * generic dispatcher act as this package; calls through a trusted
+	 * per-package binding act as the bound package (GHSA-5fv3).
+	 */
+	runPackageId?: string | null
 }) {
 	const writable = input.writable !== false
+	const runPackageId = input.runPackageId?.trim() || null
 	// One cache for the whole sandbox so nested packageStorage() SQL across
 	// granted packages (and repeated CREATE/INSERT in one export) does not
 	// rescan every inventoried bucket on each statement.
@@ -1712,6 +1733,14 @@ export function createPackageStorageKodyTools(input: {
 		}
 		if (!input.grantedPackageIds.has(packageId)) {
 			throw new Error(createPackageStorageAccessDeniedMessage(packageId))
+		}
+		// Bucket identity comes from the host, never from the id the caller
+		// names (GHSA-5fv3): a bound dispatcher stamps its own package, the
+		// generic dispatcher acts as the run package.
+		const callerPackageId =
+			getSecretAuthorityScope()?.currentPackageId?.trim() || runPackageId
+		if (callerPackageId !== packageId) {
+			throw new Error(createPackageStorageOwnerOnlyMessage(packageId))
 		}
 		let tools = toolsByPackageId.get(packageId)
 		if (!tools) {

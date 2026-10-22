@@ -150,6 +150,13 @@ export async function resolveSecretPageOrgSlug(input: {
 	return input.caller?.user?.username?.trim() || null
 }
 
+/**
+ * Nested personal-secret rule (GHSA-5fv3): when the call-site authority is not
+ * the run's own package, allow a user-scoped secret only if (1) allowed_packages
+ * already listed the authority (handled above), or (2) the authority has
+ * implicit read (self-authored or adopted), the run itself could use the
+ * secret, and the secret is not locked to some other package.
+ */
 export async function assertPackageCanAccessResolvedSecret(input: {
 	env: Pick<Env, 'APP_DB'>
 	baseUrl: string
@@ -169,10 +176,16 @@ export async function assertPackageCanAccessResolvedSecret(input: {
 	/** Default `'use'` (read/resolve). `'mutate'` always requires allowed_packages. */
 	intent?: 'use' | 'mutate'
 	/**
-	 * Stamp / call-site package id. When omitted, the bundled-run ALS or
+	 * Stamp / call-site package id. When omitted, the bundler-run ALS or
 	 * `storageContext.packageId` (the run) is used.
 	 */
 	authorityPackageId?: string | null
+	/**
+	 * The run's own package id (null = ad hoc execute with no package).
+	 * Required to apply the nested personal-secret rule; omit only on
+	 * host paths that are never nested package code.
+	 */
+	runContextPackageId?: string | null
 }) {
 	const { authorityPackageId: packageId } = resolveCallerSecretAuthority({
 		storageContext: input.storageContext,
@@ -182,11 +195,18 @@ export async function assertPackageCanAccessResolvedSecret(input: {
 	if (input.resolved.allowedPackages.includes(packageId)) return
 
 	const intent = input.intent ?? 'use'
-	// Route `use` through the shared in-flight map so multi-secret fetch
-	// auth shares one package + fork load (KODY-9K). Missing packages still
-	// fall through to the explicit not-found error below.
+	const runContext =
+		input.runContextPackageId === undefined
+			? undefined
+			: input.runContextPackageId?.trim() || null
+	const nested = runContext !== undefined && packageId !== runContext
+	// Route non-nested `use` through the shared in-flight map so multi-secret
+	// fetch auth shares one package + fork load (KODY-9K). Missing packages
+	// still fall through to the explicit not-found error below. Nested use
+	// must apply the GHSA-5fv3 hybrid rule below, so it never short-circuits.
 	if (
 		intent === 'use' &&
+		!nested &&
 		(await packageHasImplicitUserSecretReadAccess({
 			env: input.env,
 			userId: input.userId,
@@ -204,6 +224,26 @@ export async function assertPackageCanAccessResolvedSecret(input: {
 		throw new PackageSecretAccessDeniedError(
 			`Package "${packageId}" was not found for secret access.`,
 		)
+	}
+	if (intent === 'use' && nested) {
+		const authorityImplicit = await packageHasImplicitUserSecretReadAccess({
+			env: input.env,
+			userId: input.userId,
+			packageId,
+		})
+		const lockedToOther = input.resolved.allowedPackages.length > 0
+		const runCanUse = async () => {
+			if (runContext === null) return true
+			if (input.resolved.allowedPackages.includes(runContext)) return true
+			return packageHasImplicitUserSecretReadAccess({
+				env: input.env,
+				userId: input.userId,
+				packageId: runContext,
+			})
+		}
+		if (authorityImplicit && !lockedToOther && (await runCanUse())) {
+			return
+		}
 	}
 
 	const orgSlug = await resolveSecretPageOrgSlug({

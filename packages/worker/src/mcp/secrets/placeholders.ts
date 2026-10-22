@@ -1,7 +1,7 @@
 import { type SecretScope } from '#mcp/secrets/types.ts'
 
 const secretPlaceholderRegex =
-	/\{\{secret:([a-zA-Z0-9._-]+)(?:\|scope=(session|package|user))?\}\}/g
+	/\{\{secret:([a-zA-Z0-9._-]+)(?:\|scope=(session|package|user))?(?:\|ref=([A-Za-z0-9_-]+))?\}\}/g
 const providerSecretPlaceholderRegex =
 	/\{\{secret\/([a-zA-Z0-9._-]+):([^}]+)\}\}/g
 const basicAuthSecretPlaceholderRegex =
@@ -12,6 +12,8 @@ const integrationTokenPlaceholderRegex =
 export type ReferencedSecret = {
 	name: string
 	scope: SecretScope | null
+	/** Per-run HMAC for package-scoped mounts (GHSA-5fv3 option b). */
+	ref?: string | null
 }
 
 export type ReferencedBasicAuthSecretPlaceholder = {
@@ -50,12 +52,14 @@ export function parseSecretPlaceholders(value: string) {
 		const name = match[1]?.trim()
 		if (!name) continue
 		const scope = match[2]
+		const issuedRef = match[3]?.trim() || null
 		secrets.push({
 			name,
 			scope:
 				scope === 'package' || scope === 'session' || scope === 'user'
 					? scope
 					: null,
+			...(issuedRef ? { ref: issuedRef } : {}),
 		})
 	}
 	return secrets
@@ -114,9 +118,9 @@ export function buildIntegrationTokenPlaceholder(name: string) {
 }
 
 export function buildSecretPlaceholder(secret: ReferencedSecret) {
-	return secret.scope
-		? `{{secret:${secret.name}|scope=${secret.scope}}}`
-		: `{{secret:${secret.name}}}`
+	const scopePart = secret.scope ? `|scope=${secret.scope}` : ''
+	const refPart = secret.ref ? `|ref=${secret.ref}` : ''
+	return `{{secret:${secret.name}${scopePart}${refPart}}}`
 }
 
 export function buildBasicAuthSecretPlaceholder(input: {

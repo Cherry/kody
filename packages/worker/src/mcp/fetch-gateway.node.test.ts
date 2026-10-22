@@ -833,22 +833,37 @@ test('fetch gateway authorizes {{secret}} as the stamped package, not the import
 		userSecret('secret-value', ['example.com'], ['pkg-a']),
 	)
 
-	const stamped = await expand(request('pkg-a'), runProps)
+	// GHSA-5fv3: the package comes from the host-minted per-package binding
+	// (`boundPackageId` on the gateway props), never from a request header.
+	const stamped = await expand(request(), {
+		...runProps,
+		boundPackageId: 'pkg-a',
+	})
 	expect(stamped.headers.get('Authorization')).toBe('Bearer secret-value')
 	expect(stamped.headers.get('x-kody-secret-authority')).toBeNull()
 
-	// Unstamped and unrelated stamps authorize as the importing run. An empty
-	// grant set is an installed empty set, not "no set", and an omitted set is
-	// also fail-closed: a forged pkg-a header must not select that authority.
+	// Any header (granted or not) is stripped and ignored: the request
+	// authorizes as the importing run.
 	for (const [authority, extra] of [
 		[undefined, {}],
 		['pkg-unrelated', {}],
+		['pkg-a', {}],
 		['pkg-a', { grantedSecretAuthorityPackageIds: [] }],
 		['pkg-a', { grantedSecretAuthorityPackageIds: undefined }],
 	] as const) {
 		await expect(
 			expand(request(authority), { ...runProps, ...extra }),
 		).rejects.toSatisfy(isPackageAccessRequiredFor('importer'))
+	}
+
+	// A bound id outside the run grant set (or with no grant set) is refused.
+	for (const extra of [
+		{ boundPackageId: 'pkg-unrelated' },
+		{ boundPackageId: 'pkg-a', grantedSecretAuthorityPackageIds: [] },
+	]) {
+		await expect(expand(request(), { ...runProps, ...extra })).rejects.toThrow(
+			'Fetch gateway bound package id is not in the run grant set.',
+		)
 	}
 })
 
@@ -903,17 +918,12 @@ test('fetch gateway gates integration tokens by the connection grant and require
 	expect(packageSpy).not.toHaveBeenCalled()
 	expect(forkSpy).not.toHaveBeenCalled()
 
-	// Package export imported into execute: run has no packageId, stamp header
-	// carries the callee package for integrationLock grants (same as secrets).
+	// Package export imported into execute: run has no packageId; the
+	// callee's per-package binding (boundPackageId) carries the package for
+	// integrationLock grants (same as secrets). A header never does.
 	grantSpy.mockClear()
 	const stampedFromExecute = await expand(
-		(() => {
-			const headers = new Headers({
-				Authorization: 'Bearer {{integration-token:google}}',
-			})
-			headers.set('x-kody-secret-authority', 'pkg-1')
-			return new Request('https://example.com/api', { headers })
-		})(),
+		integrationRequest('https://example.com/api'),
 		{
 			...props,
 			storageContext: {
@@ -923,6 +933,7 @@ test('fetch gateway gates integration tokens by the connection grant and require
 				storageId: null,
 			},
 			grantedSecretAuthorityPackageIds: ['pkg-1'],
+			boundPackageId: 'pkg-1',
 		},
 	)
 	expect(stampedFromExecute.headers.get('Authorization')).toBe(

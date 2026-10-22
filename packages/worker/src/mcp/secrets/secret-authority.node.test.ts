@@ -1,14 +1,11 @@
 import { expect, test } from 'vitest'
 import {
 	grantedSecretAuthorityPackageIdSet,
-	attachSecretAuthorityToCapabilityArgs,
-	readSecretAuthorityHeader,
 	resolveSecretAuthorityPackageId,
 	getSecretAuthorityScope,
 	runWithCurrentSecretAuthority,
 	runWithSecretAuthorityScope,
 	secretAuthorityArgName,
-	secretAuthorityHeaderName,
 	takeSecretAuthorityFromCapabilityArgs,
 	resolveCallerSecretAuthority,
 } from './secret-authority.ts'
@@ -46,18 +43,7 @@ test('secret authority prefers a granted stamp id and ignores unrelated forgerie
 	).toBe('pkg-a')
 })
 
-test('fetch header and capability args carry stamp identity and drop forgeries', () => {
-	const granted = new Set(['pkg-a'])
-	const headers = new Headers({
-		[secretAuthorityHeaderName]: 'pkg-a',
-	})
-	expect(readSecretAuthorityHeader(headers, granted)).toBe('pkg-a')
-	headers.set(secretAuthorityHeaderName, 'pkg-unrelated')
-	expect(readSecretAuthorityHeader(headers, granted)).toBeNull()
-	expect(readSecretAuthorityHeader(headers)).toBeNull()
-	expect(readSecretAuthorityHeader(headers, null)).toBeNull()
-	expect(readSecretAuthorityHeader(headers, new Set())).toBeNull()
-
+test('capability args drop a forged authority field', () => {
 	const taken = takeSecretAuthorityFromCapabilityArgs([
 		{ name: 'token', [secretAuthorityArgName]: 'pkg-a' },
 	])
@@ -67,18 +53,6 @@ test('fetch header and capability args carry stamp identity and drop forgeries',
 		takeSecretAuthorityFromCapabilityArgs([{ name: 'token' }])
 			.requestedPackageId,
 	).toBeNull()
-	expect(
-		attachSecretAuthorityToCapabilityArgs(
-			{ name: 'token', [secretAuthorityArgName]: 'pkg-forged' },
-			null,
-		),
-	).toEqual({ name: 'token' })
-	expect(
-		attachSecretAuthorityToCapabilityArgs(
-			{ name: 'token', [secretAuthorityArgName]: 'pkg-forged' },
-			'pkg-a',
-		),
-	).toEqual({ name: 'token', [secretAuthorityArgName]: 'pkg-a' })
 })
 
 test('runWithCurrentSecretAuthority installs current without a parent scope', () => {

@@ -700,3 +700,183 @@ export default async function main() {
 		expect(result.error).not.toContain('do-not-leak')
 	},
 )
+
+/*
+ * GHSA-5fv3 follow-up: package storage identity. A bucket belongs to the
+ * package whose code is running, not to whichever granted id a caller
+ * names. Importer code, sibling packages, and the run package must not
+ * read or write another statically imported package's bucket by passing
+ * its id to `kody.packageStorage*` or the runtime store's
+ * `__kodyPackageStorage` factory. The owner keeps full access.
+ */
+const storageProbeSource = (targetExpr: string) => `
+	const target = ${targetExpr}
+	const out = {}
+	const msg = (e) => String(e?.message ?? e).slice(0, 160)
+	try { out.kodyGet = (await kody.packageStorageGet({ packageId: target, key: 'secret' }))?.value ?? null } catch (e) { out.kodyGet = msg(e) }
+	try { await kody.packageStorageSet({ packageId: target, key: 'secret', value: 'overwritten-by-intruder' }); out.kodySet = 'ok' } catch (e) { out.kodySet = msg(e) }
+	try { out.kodyList = JSON.stringify(await kody.packageStorageList({ packageId: target })) } catch (e) { out.kodyList = msg(e) }
+	try { out.kodySql = JSON.stringify(await kody.packageStorageSql({ packageId: target, query: 'select 1 as one', writable: true })) } catch (e) { out.kodySql = msg(e) }
+	try {
+		const store = globalThis[Symbol.for('kody.runtimeStorage')]?.getStore?.()
+		const factory = store?.__kodyPackageStorage
+		if (typeof factory === 'function') {
+			const bucket = factory(target)
+			try { out.storeGet = await bucket.get('secret') } catch (e) { out.storeGet = msg(e) }
+			try { await bucket.set('secret', 'overwritten-via-store'); out.storeSet = 'ok' } catch (e) { out.storeSet = msg(e) }
+			try { await bucket.clear(); out.storeClear = 'ok' } catch (e) { out.storeClear = msg(e) }
+		} else {
+			out.storeGet = 'no-factory'
+		}
+	} catch (e) { out.storeGet = msg(e) }
+	return out`
+
+function expectProbeDenied(probe: Record<string, unknown>) {
+	expect(JSON.stringify(probe)).not.toContain('do-not-leak')
+	expect(probe['kodySet']).not.toBe('ok')
+	expect(probe['storeSet']).not.toBe('ok')
+	expect(probe['storeClear']).not.toBe('ok')
+	expect(String(probe['kodyList'] ?? '')).not.toContain('"secret"')
+	expect(String(probe['kodySql'] ?? '')).not.toContain('"one"')
+}
+
+async function publishVault(userId: string) {
+	const vault = await publishPackage(
+		userId,
+		'vault',
+		'Holds private data in its own bucket',
+		'./peek',
+		`import { packageStorage } from 'kody:runtime'
+export default async function peek() {
+	const bucket = packageStorage()
+	const before = await bucket.get('secret')
+	await bucket.set('owner-wrote', 'yes')
+	return { before, ownerWrote: await bucket.get('owner-wrote') }
+}`,
+	)
+	await packageBucketRunner(userId, vault.packageId).setValue({
+		key: 'secret',
+		value: 'do-not-leak',
+	})
+	return vault
+}
+
+async function expectVaultIntact(userId: string, vaultId: string) {
+	await expect(
+		packageBucketRunner(userId, vaultId).getValue({ key: 'secret' }),
+	).resolves.toEqual({ key: 'secret', value: 'do-not-leak' })
+}
+
+test(
+	'GHSA-5fv3 storage: importer code cannot read or write an imported package bucket by naming its id',
+	{ timeout: 90_000 },
+	async () => {
+		const userId = await setupUser()
+		const vault = await publishVault(userId)
+		const bundle = await buildEntry(
+			userId,
+			`import { kody } from 'kody:runtime'
+import peek from 'kody:@kentcdodds/vault/peek'
+export default async function main() {
+	const probe = await (async () => {${storageProbeSource(JSON.stringify(vault.packageId))}
+	})()
+	return { probe, owner: await peek() }
+}`,
+		)
+		expect(bundle.dependencies).toMatchObject([{ packageId: vault.packageId }])
+		const result = await runBundle(userId, bundle)
+		expect(result.error, JSON.stringify(result.result)).toBeUndefined()
+		const { probe, owner } = result.result as {
+			probe: Record<string, unknown>
+			owner: unknown
+		}
+		expectProbeDenied(probe)
+		// The owner still reads and writes its own bucket.
+		expect(owner).toEqual({ before: 'do-not-leak', ownerWrote: 'yes' })
+		await expectVaultIntact(userId, vault.packageId)
+	},
+)
+
+test(
+	'GHSA-5fv3 storage: a sibling package cannot read or write another imported package bucket',
+	{ timeout: 90_000 },
+	async () => {
+		const userId = await setupUser()
+		const vault = await publishVault(userId)
+		await publishPackage(
+			userId,
+			'snoop',
+			'Third-party helper that tries to read the vault',
+			'./run',
+			`import { kody } from 'kody:runtime'
+export default async function run(targetId) {${storageProbeSource('targetId')}
+}`,
+		)
+		const bundle = await buildEntry(
+			userId,
+			`import peek from 'kody:@kentcdodds/vault/peek'
+import snoop from 'kody:@kentcdodds/snoop/run'
+export default async function main() {
+	const probe = await snoop(${JSON.stringify(vault.packageId)})
+	return { probe, owner: await peek() }
+}`,
+		)
+		const result = await runBundle(userId, bundle)
+		expect(result.error, JSON.stringify(result.result)).toBeUndefined()
+		const { probe, owner } = result.result as {
+			probe: Record<string, unknown>
+			owner: unknown
+		}
+		expectProbeDenied(probe)
+		expect(owner).toEqual({ before: 'do-not-leak', ownerWrote: 'yes' })
+		await expectVaultIntact(userId, vault.packageId)
+	},
+)
+
+test(
+	'GHSA-5fv3 storage: the run package cannot read or write a dependency bucket by naming its id',
+	{ timeout: 90_000 },
+	async () => {
+		const userId = await setupUser()
+		const vault = await publishVault(userId)
+		const outerUnique = crypto.randomUUID()
+		const outerPackageId = `pkg-${outerUnique}`
+		const { entryPoint, sourceFiles } = makePackageFiles(
+			'outer-runner',
+			'Run package that imports the vault',
+			'./run',
+			`import { kody, packageStorage } from 'kody:runtime'
+import peek from 'kody:@kentcdodds/vault/peek'
+export default async function run() {
+	const probe = await (async () => {${storageProbeSource(JSON.stringify(vault.packageId))}
+	})()
+	await packageStorage().set('mine', 'outer')
+	return { probe, owner: await peek(), own: await packageStorage().get('mine') }
+}`,
+			{ dependencies: { '@kentcdodds/vault': '*' } },
+		)
+		const bundle = await buildKodyModuleBundle({
+			env,
+			baseUrl,
+			userId,
+			sourceFiles,
+			entryPoint,
+			rootPackageId: outerPackageId,
+		})
+		const result = await runBundle(userId, bundle, {
+			packageId: outerPackageId,
+			kodyId: 'outer-runner',
+			sourceId: `source-${outerUnique}`,
+		})
+		expect(result.error, JSON.stringify(result.result)).toBeUndefined()
+		const { probe, owner, own } = result.result as {
+			probe: Record<string, unknown>
+			owner: unknown
+			own: unknown
+		}
+		expectProbeDenied(probe)
+		expect(owner).toEqual({ before: 'do-not-leak', ownerWrote: 'yes' })
+		expect(own).toBe('outer')
+		await expectVaultIntact(userId, vault.packageId)
+	},
+)

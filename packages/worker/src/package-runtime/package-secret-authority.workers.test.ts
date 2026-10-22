@@ -564,7 +564,7 @@ test(
 		const userId = `user-${crypto.randomUUID()}`
 		await provisionTestUser(userId, `wt-${userId.slice(-12)}`)
 		const wake = await publishGrokBotWake(userId, victimWakeModuleSource)
-		const importer = await publishDependent(
+		await publishDependent(
 			userId,
 			{
 				'src/steal-authority.ts': `import { packageSecrets } from 'kody:runtime'
@@ -650,14 +650,13 @@ export default async function stealAuthority() {
 		const attack = stolenResult.attack
 		expect(attack.legit).toEqual({
 			token: wakeRef,
-			duringStamp: wake.packageId,
+			duringStamp: null,
 		})
-		// Shared stamp ALS makes Symbol.for('kody.getSecretAuthority') a live
-		// read of the current meter stamp. The steal module is itself metered as
-		// `dependent`, so after wake() returns the getter still reports that id —
-		// not null (the old dual-ALS quirk) and never the victim package id.
+		// GHSA-5fv3: identity is a trusted per-package binding. There is no
+		// global getter to read or seal; a getter the attacker plants naming
+		// the victim is simply ignored (the direct read below runs after it).
 		expect(attack).toMatchObject({
-			getterType: 'function',
+			getterType: 'undefined',
 			hungRunType: 'undefined',
 			stolenSymbols: [],
 			stolenToken: null,
@@ -665,12 +664,10 @@ export default async function stealAuthority() {
 			directError: expect.stringMatching(
 				/^Secret "wakeToken" is not allowed for package "dependent"/,
 			),
-			redefineError: expect.stringMatching(/Cannot|redefine|configurable/i),
-			forgedAfterRedefine: importer.packageId,
-			getAuthority: importer.packageId,
+			redefineError: null,
+			forgedAfterRedefine: wake.packageId,
+			getAuthority: null,
 		})
-		expect(attack.forgedAfterRedefine).not.toBe(wake.packageId)
-		expect(attack.getAuthority).not.toBe(wake.packageId)
 		expect(JSON.stringify(stolen.result)).not.toContain('wake-secret-value')
 	},
 )
@@ -759,8 +756,8 @@ export default async function forge() {
 		const forgedResult = forged.result as ForgeryExecuteResult
 		expect(forgedResult.importedWake).toBe('function')
 		expect(forgedResult.attack).toEqual({
-			legit: { value: { token: wakeRef, duringStamp: wake.packageId } },
-			exportedInternals: [],
+			legit: { value: { token: wakeRef, duringStamp: null } },
+			exportedInternals: ['__kodyBoundFetch'],
 			viaNamespace: { value: 'no-helper' },
 			viaComputedImport: internalModule,
 			viaDependencyImport: internalModule,
@@ -1051,9 +1048,11 @@ export default async function main() {
 			duringStamp: string | null
 			fetchOutcome: { ok: true; status: number } | { ok: false; error: string }
 		}
-		expect(result.token).toBe('{{secret:wakeToken|scope=package}}')
+		expect(result.token).toMatch(
+			/^\{\{secret:wakeToken\|scope=package(?:\|ref=[A-Za-z0-9_-]+)?\}\}$/,
+		)
 		expect(JSON.stringify(result)).not.toContain('package-wake-secret-value')
-		expect(result.duringStamp).toBe(wake.packageId)
+		expect(result.duringStamp).toBeNull()
 		// Stamp must make the package-scoped secret visible to outbound fetch.
 		// Network/mock failures are out of scope; visibility errors are the bug.
 		if (!result.fetchOutcome.ok) {
@@ -1064,7 +1063,13 @@ export default async function main() {
 	},
 )
 
-const packageWakeRef = { token: '{{secret:wakeToken|scope=package}}' }
+function expectPackageWakeRef(value: unknown) {
+	expect(value).toEqual({
+		token: expect.stringMatching(
+			/^\{\{secret:wakeToken\|scope=package(?:\|ref=[A-Za-z0-9_-]+)?\}\}$/,
+		),
+	})
+}
 
 const credentialWakeSource = `import { credential } from 'kody:runtime'
 export default async function wake() {
@@ -1151,14 +1156,14 @@ test(
 	{ timeout: 90_000 },
 	async () => {
 		const { userId, dep, call } = await setupStalePackageWake()
-		expect(await call()).toEqual(packageWakeRef)
+		expectPackageWakeRef(await call())
 		await republishGrokBotV2({
 			userId,
 			dep,
 			secretMounts: wakeMount('package'),
 			stampKeys: ['wakeToken'],
 		})
-		expect(await call()).toEqual(packageWakeRef)
+		expectPackageWakeRef(await call())
 	},
 )
 
@@ -1167,7 +1172,7 @@ test(
 	{ timeout: 90_000 },
 	async () => {
 		const { userId, dep, call } = await setupStalePackageWake()
-		expect(await call()).toEqual(packageWakeRef)
+		expectPackageWakeRef(await call())
 		await republishGrokBotV2({
 			userId,
 			dep,
@@ -1186,14 +1191,14 @@ test(
 	{ timeout: 90_000 },
 	async () => {
 		const { userId, dep, storageContext, call } = await setupStalePackageWake()
-		expect(await call()).toEqual(packageWakeRef)
+		expectPackageWakeRef(await call())
 		await republishGrokBotV2({
 			userId,
 			dep,
 			secretMounts: wakeMount('package'),
 			stampKeys: ['wakeToken'],
 		})
-		expect(await call()).toEqual(packageWakeRef)
+		expectPackageWakeRef(await call())
 		const deleted = await deleteSecret({
 			env,
 			userId: ownerIdFromStored(userId),
@@ -1203,7 +1208,9 @@ test(
 		})
 		expect(deleted).toBe(true)
 		const cutoff = await call()
-		expect(cutoff).not.toEqual(packageWakeRef)
+		expect(cutoff).not.toMatchObject({
+			token: expect.stringContaining('wakeToken'),
+		})
 		expect(JSON.stringify(cutoff)).not.toContain('{{secret:')
 		expect(JSON.stringify(cutoff)).toMatch(/wakeToken/i)
 	},
@@ -1262,7 +1269,7 @@ test(
 	{ timeout: 90_000 },
 	async () => {
 		const { userId, dep, call } = await setupStalePackageWake()
-		expect(await call()).toEqual(packageWakeRef)
+		expectPackageWakeRef(await call())
 		await republishGrokBotV2({
 			userId,
 			dep,

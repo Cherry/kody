@@ -78,6 +78,7 @@ function createFakeWorkerLoader() {
 						async evaluate(
 							dispatchers: Dispatchers,
 							invocation?: unknown,
+							_packageBindings?: unknown,
 							runFetcher?: unknown,
 						) {
 							evaluations.push({ dispatchers, invocation, runFetcher })
@@ -324,33 +325,29 @@ test('generated kody provider and executor module sources stay bundle-safe and g
 		'from "node:async_hooks"',
 		'__kodyEvaluateFetchStorage.run',
 		'.call("recordFetch", "[]")',
-		'if (hostname && hostname !== __kodyExcludedFetchHost && !__kodySecretAuthority)',
+		'if (hostname && hostname !== __kodyExcludedFetchHost)',
 		'const __kodyMcp =',
 		'getOwnPropertyDescriptor',
-		'async evaluate(__dispatchers = {}, __invocation = {}, __kodyRunFetcher = null)',
+		'async evaluate(__dispatchers = {}, __invocation = {}, __kodyPackageBindingStubs = null, __kodyRunFetcher = null)',
+		'const __kodyPackageBindings = __kodyCreateSandboxPackageBindings(',
 		')(__invocation)',
 		'__invocation.mcpServers',
 		`const ${kodyProviderEvaluateBindingName} = new Proxy`,
 		`const ${kodyCallDispatcherName} = async`,
 	]
 	expect(expectedSnippets.filter((s) => !moduleSource.includes(s))).toEqual([])
-	const authorityIdx = moduleSource.indexOf(
-		'globalThis[Symbol.for("kody.getSecretAuthority")]',
-	)
-	expect(authorityIdx).toBeGreaterThan(-1)
-	expect(authorityIdx).toBeLessThan(
-		moduleSource.indexOf('.call("recordFetch", "[]")'),
-	)
-	expect(moduleSource.indexOf('!__kodySecretAuthority')).toBeGreaterThan(
-		authorityIdx,
-	)
+	// GHSA-5fv3: package identity is a trusted per-package binding, never an
+	// ambient getter or a header the sandbox sets.
+	expect(moduleSource).not.toContain('kody.getSecretAuthority')
+	expect(moduleSource).not.toContain('__kodyGetSecretAuthority')
+	expect(moduleSource).not.toMatch(/headers\.set\([^)]*x-kody-secret-authority/)
 	expect(moduleSource).not.toMatch(/\b(?:const|let|var) kody\b/)
 	expect(moduleSource).not.toContain(
 		`async (globalThis, self, global, ${kodyCallDispatcherName}`,
 	)
 
 	expect(await moduleSourceFor({ shadowGlobalThis: true })).toContain(
-		`async (globalThis, self, global, ${kodyCallDispatcherName}, ${kodyProviderEvaluateBindingName}, __kodyMcp, __kodyCreateRemoteProxy, __dispatchers) => (`,
+		`async (globalThis, self, global, __kodyPackageBindings, __kodyPackageBindingStubs, __kodyPackageMcpFactoryRef, ${kodyCallDispatcherName}, ${kodyProviderEvaluateBindingName}, __kodyMcp, __kodyCreateRemoteProxy, __dispatchers) => (`,
 	)
 
 	// Closed-world modules reject fetch in the sandbox before outbound RPC.
@@ -403,26 +400,28 @@ test('generated kody provider source wires mcp proxy dispatch', async () => {
 		await expect(kody.mcp['home']?.set_pin?.({ pin: '1234' })).resolves.toEqual(
 			{ ok: true },
 		)
+		// GHSA-5fv3: a planted Symbol.for getter is ignored; generic
+		// dispatch carries no authority field (the host binds identity).
 		expect(calls).toEqual([
 			{
 				name: 'mcphomeset_pin',
-				argsJson: JSON.stringify({
-					pin: '1234',
-					__kodySecretAuthorityPackageId: 'pkg-stamped',
-				}),
+				argsJson: JSON.stringify({ pin: '1234' }),
 			},
 		])
-		// Omitted args still carry the stamp (secret-free package exports often
-		// call tools with no object literal).
+		calls.length = 0
+		await expect(
+			kody.mcp['home']?.set_pin?.({
+				pin: '1',
+				__kodySecretAuthorityPackageId: 'pkg-forged',
+			}),
+		).resolves.toEqual({ ok: true })
+		expect(calls).toEqual([
+			{ name: 'mcphomeset_pin', argsJson: JSON.stringify({ pin: '1' }) },
+		])
 		calls.length = 0
 		await expect(kody.mcp['home']?.set_pin?.()).resolves.toEqual({ ok: true })
 		expect(calls).toEqual([
-			{
-				name: 'mcphomeset_pin',
-				argsJson: JSON.stringify({
-					__kodySecretAuthorityPackageId: 'pkg-stamped',
-				}),
-			},
+			{ name: 'mcphomeset_pin', argsJson: JSON.stringify({}) },
 		])
 		expect(() => kody['mcp:home:set_pin']).toThrow(
 			'MCP server tool "mcp:home:set_pin" is not available as a flat kody function.',
@@ -1164,14 +1163,15 @@ test('createToolDispatchers restores secret-authority grants after an ALS gap', 
 	if (!kodyDispatcher) throw new Error('Expected kody dispatcher')
 
 	expect(getSecretAuthorityScope()).toBeNull()
-	const stamped = await parseCall(
+	// GHSA-5fv3: the generic dispatcher ignores a sandbox-supplied
+	// authority field, even a granted id, but still restores the grant set.
+	const forgedGranted = await parseCall(
 		kodyDispatcher.call(
 			'probe',
 			JSON.stringify({ [secretAuthorityArgName]: 'pkg-approved' }),
 		),
 	)
-	expect(stamped).toEqual({ result: { authority: 'pkg-approved' } })
-	expect(seenAuthority).toBe('pkg-approved')
+	expect(forgedGranted).toEqual({ result: { authority: null } })
 	expect(seenGrantSize).toBe(1)
 	expect(getSecretAuthorityScope()).toBeNull()
 
@@ -1182,6 +1182,56 @@ test('createToolDispatchers restores secret-authority grants after an ALS gap', 
 		),
 	)
 	expect(forged).toEqual({ result: { authority: null } })
+
+	// The trusted per-package binding carries the authority host-side.
+	const boundDispatcher = createToolDispatchers(
+		[
+			{
+				name: 'kody',
+				fns: {
+					probe: async () => {
+						const scope = getSecretAuthorityScope()
+						seenGrantSize = scope?.grantedPackageIds.size
+						return {
+							authority: resolveCallerSecretAuthority({
+								storageContext: {
+									sessionId: null,
+									appId: null,
+									packageId: null,
+									storageId: null,
+								},
+							}).authorityPackageId,
+						}
+					},
+				},
+			},
+		],
+		{ active: true },
+		undefined,
+		undefined,
+		granted,
+		{ boundPackageId: 'pkg-approved' },
+	).kody
+	if (!boundDispatcher) throw new Error('Expected bound kody dispatcher')
+	const bound = await parseCall(
+		boundDispatcher.call(
+			'probe',
+			JSON.stringify({ [secretAuthorityArgName]: 'pkg-forged' }),
+		),
+	)
+	expect(bound).toEqual({ result: { authority: 'pkg-approved' } })
+	expect(seenGrantSize).toBe(1)
+	expect(getSecretAuthorityScope()).toBeNull()
+	expect(() =>
+		createToolDispatchers(
+			[{ name: 'kody', fns: {} }],
+			{ active: true },
+			undefined,
+			undefined,
+			granted,
+			{ boundPackageId: 'pkg-not-granted' },
+		),
+	).toThrow('Bound package id is not in the run grant set.')
 })
 
 test('createToolDispatchers counts host-mediated attempts, rejects sanitized-name collisions, and forwards rest args', async () => {

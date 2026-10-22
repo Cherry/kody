@@ -9,6 +9,10 @@ import {
 	createRuntimeModuleReexportSource,
 	createRuntimeModuleSource,
 } from './module-graph.ts'
+import {
+	createPackageRuntimeModuleSource,
+	createPublicRuntimeModuleSource,
+} from './runtime-source-modules.ts'
 
 // The kody:runtime virtual module captures its named exports statically
 // when it evaluates inside the surrounding AsyncLocalStorage context. The
@@ -35,7 +39,17 @@ type RuntimeModule = {
 		callback: () => Promise<T>,
 	) => Promise<T>
 	__kodyMeterStaticPackageExport: <T>(packageId: string, exportValue: T) => T
-	__kodyGetSecretAuthority: () => string | null
+	__kodyCreatePackageBoundFetch: (
+		packageId: string,
+	) => (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+	__kodyRunWithPackageBindings: <T>(
+		bindings: Map<string, unknown>,
+		callback: () => T,
+	) => T
+	__kodyCreatePackageBoundSecrets: (packageId: string) => {
+		get: (alias: string) => Promise<string>
+		has: (alias: string) => Promise<boolean>
+	}
 	kody:
 		| { tool_call: (args: unknown) => Promise<unknown>; mcp: McpServers }
 		| undefined
@@ -379,79 +393,23 @@ export async function simulateFetch(runtime) {
 	)
 })
 
-test('hosted package-app fetch path: host stamps ignore a forged Symbol.for authority', async () => {
-	const { Worker } = await import('node:worker_threads')
-	const result = await new Promise<{
-		forgedBeforeLoad: string | null
-		hostStamp: string
-		moduleStamp: string | null
-	}>((resolve, reject) => {
-		const worker = new Worker(
-			`
-import { parentPort } from 'node:worker_threads'
-import { AsyncLocalStorage } from 'node:async_hooks'
-import { writeFileSync, mkdirSync, rmSync } from 'node:fs'
-import { join } from 'node:path'
-import { tmpdir } from 'node:os'
-import { pathToFileURL } from 'node:url'
-
-const authoritySymbol = Symbol.for('kody.getSecretAuthority')
-Object.defineProperty(globalThis, authoritySymbol, {
-	value: () => 'pkg-forged-dependency',
-	writable: true,
-	configurable: true,
-	enumerable: false,
-})
-const storage = new AsyncLocalStorage()
-globalThis[Symbol.for('kody.runtimeStorage')] = storage
-const dir = join(tmpdir(), \`kody-host-stamp-\${Date.now()}\`)
-mkdirSync(join(dir, '.__kody_virtual__'), { recursive: true })
-writeFileSync(join(dir, '.__kody_virtual__/runtime.js'), ${JSON.stringify(runtimeSource)})
-writeFileSync(
-	join(dir, 'package-app-entry.js'),
-	\`
-let getSecretAuthority = null;
-function readSecretAuthority() {
-	return typeof getSecretAuthority === 'function' ? (getSecretAuthority() ?? '') : '';
-}
-async function ensureRuntimeLoaded() {
-	if (typeof getSecretAuthority === 'function') return;
-	const runtimeModule = await import('./.__kody_virtual__/runtime.js');
-	getSecretAuthority = runtimeModule.__kodyGetSecretAuthority;
-}
-const storage = globalThis[Symbol.for('kody.runtimeStorage')];
-export async function simulateFetch(runtime) {
-	const forgedBeforeLoad = globalThis[Symbol.for('kody.getSecretAuthority')]();
-	return storage.run(runtime, async () => {
-		await ensureRuntimeLoaded();
-		return {
-			forgedBeforeLoad,
-			hostStamp: readSecretAuthority(),
-			moduleStamp: getSecretAuthority(),
-		};
-	});
-}
-\`,
-)
-try {
-	const entry = await import(pathToFileURL(join(dir, 'package-app-entry.js')).href)
-	const outcome = await entry.simulateFetch({})
-	parentPort.postMessage(outcome)
-} finally {
-	rmSync(dir, { recursive: true, force: true })
-}
-`,
-			{ eval: true },
-		)
-		worker.on('message', resolve)
-		worker.on('error', reject)
-		worker.on('exit', (code) => {
-			if (code !== 0) reject(new Error(`worker exited ${code}`))
-		})
-	})
-	expect(result.forgedBeforeLoad).toBe('pkg-forged-dependency')
-	expect(result.hostStamp).toBe('')
-	expect(result.moduleStamp).toBeNull()
+test('package code cannot reach the trusted package-binding scope (GHSA-5fv3)', () => {
+	// The host wrapper enters the runtime's private binding scope; package
+	// code only ever imports the public runtime or its own per-package facade,
+	// neither of which re-exports the scope entry or any ambient getter.
+	for (const source of [
+		createPublicRuntimeModuleSource(),
+		createPackageRuntimeModuleSource('pkg-a'),
+	]) {
+		expect(source).not.toContain('__kodyRunWithPackageBindings')
+		expect(source).not.toContain('getSecretAuthority')
+		expect(source).not.toMatch(/export \*/)
+	}
+	expect(runtimeSource).toContain(
+		'export function __kodyRunWithPackageBindings(',
+	)
+	expect(runtimeSource).not.toContain('kody.getSecretAuthority')
+	expect(runtimeSource).not.toContain('__kodyGetSecretAuthority')
 })
 
 test('preloaded kody exports resolve from the active runtime store', async () => {
@@ -727,7 +685,7 @@ test('kody.mcp tool calls stay callable when the current run throws on Get', asy
 	})
 })
 
-test('secret-authority stamps stay visible across hydrated runtime.js copies', async () => {
+test('trusted package bindings are shared across hydrated runtime.js copies and scoped to the wrapper run (GHSA-5fv3)', async () => {
 	await withRuntimeIsolationCleanup(async ({ writeTempFiles }) => {
 		const siblingPath =
 			'.__kody_packages__/pkg/.__published_bundle__/2e/.__kody_virtual__/runtime.js'
@@ -735,111 +693,131 @@ test('secret-authority stamps stay visible across hydrated runtime.js copies', a
 			'.__kody_virtual__/runtime.js': runtimeSource,
 			[siblingPath]: createRuntimeModuleReexportSource(siblingPath),
 		})
-		const rootCopy = (await import(
-			urls['.__kody_virtual__/runtime.js'] ?? ''
-		)) as RuntimeModule
-		const siblingCopy = (await import(urls[siblingPath] ?? '')) as RuntimeModule
-		const globals = globalThis as unknown as GlobalSymbols
+		// Unbound fetch falls back to the global fetch captured at module init.
+		const originalFetch = globalThis.fetch
+		const originalTrim = String.prototype.trim
+		const globalCalls: Array<string> = []
+		globalThis.fetch = (async (input: RequestInfo | URL) => {
+			globalCalls.push(String(input))
+			return new Response('global')
+		}) as typeof fetch
+		try {
+			// Same URLs the sibling re-export resolves, so both copies share one
+			// evaluated root (fresh temp dir per test).
+			const rootCopy = (await import(
+				urls['.__kody_virtual__/runtime.js'] ?? ''
+			)) as RuntimeModule
+			const siblingCopy = (await import(
+				urls[siblingPath] ?? ''
+			)) as RuntimeModule
+			expect(siblingCopy.__kodyRunWithPackageBindings).toBe(
+				rootCopy.__kodyRunWithPackageBindings,
+			)
+			const boundCalls: Array<string> = []
+			const binding = (id: string) =>
+				Object.freeze({
+					fetch: async (input: RequestInfo | URL) => {
+						boundCalls.push(`${id} ${String(input)}`)
+						return new Response(id)
+					},
+					kodyCall: async () => null,
+					packageSecretGet: async (alias: string) => {
+						boundCalls.push(`${id} get ${alias}`)
+						return `ref-${id}`
+					},
+					packageSecretHas: async () => true,
+				})
+			const bindings = new Map([['pkg-a', binding('pkg-a')]])
+			const fetchA = siblingCopy.__kodyCreatePackageBoundFetch('pkg-a')
+			const fetchB = rootCopy.__kodyCreatePackageBoundFetch('pkg-b')
+			const secretsA = siblingCopy.__kodyCreatePackageBoundSecrets('pkg-a')
 
-		expect(globals[Symbol.for('kody.secretAuthorityStorage')]).toBeUndefined()
-
-		const peek = siblingCopy.__kodyGetSecretAuthority
-		const stamped = siblingCopy.__kodyMeterStaticPackageExport(
-			'pkg-artifact',
-			() => peek(),
-		)
-		expect(stamped()).toBe('pkg-artifact')
-		expect(peek()).toBeNull()
-
-		const stampedOnRoot = rootCopy.__kodyMeterStaticPackageExport(
-			'pkg-root',
-			() => rootCopy.__kodyGetSecretAuthority(),
-		)
-		expect(stampedOnRoot()).toBe('pkg-root')
-
-		class ArtifactClass {
-			authority: string | null
-			constructor() {
-				this.authority = peek()
+			// Outside the wrapper scope nothing is bound.
+			expect(await (await fetchA('https://example.com/out')).text()).toBe(
+				'global',
+			)
+			// A package code forgery of the legacy globals changes nothing.
+			const globals = globalThis as unknown as GlobalSymbols
+			globals[Symbol.for('kody.secretAuthorityStorage')] = {
+				getStore: () => 'pkg-a',
+				run: (_packageId: string, callback: () => unknown) => callback(),
 			}
-		}
-		const Wrapped = siblingCopy.__kodyMeterStaticPackageExport(
-			'pkg-ctor',
-			ArtifactClass,
-		)
-		expect(new Wrapped().authority).toBe('pkg-ctor')
-		expect(peek()).toBeNull()
+			globals[Symbol.for('kody.getSecretAuthority')] = () => 'pkg-a'
 
-		globals[Symbol.for('kody.secretAuthorityStorage')] = {
-			getStore: () => 'pkg-forged',
-			run: (_packageId: string, callback: () => string) => callback(),
+			await rootCopy.__kodyRunWithPackageBindings(bindings, async () => {
+				expect(await (await fetchA('https://example.com/a')).text()).toBe(
+					'pkg-a',
+				)
+				// B has no binding of its own and cannot name A's.
+				expect(await (await fetchB('https://example.com/b')).text()).toBe(
+					'global',
+				)
+				// Alias normalization uses the trim captured at module init.
+				let trimCalls = 0
+				String.prototype.trim = function () {
+					trimCalls += 1
+					return Reflect.apply(originalTrim, this, [])
+				}
+				try {
+					expect(await secretsA.get('  wakeToken ')).toBe('ref-pkg-a')
+				} finally {
+					String.prototype.trim = originalTrim
+				}
+				expect(trimCalls).toBe(0)
+			})
+			// A callback that outlives the scope is unbound again.
+			expect(await (await fetchA('https://example.com/after')).text()).toBe(
+				'global',
+			)
+			expect(boundCalls).toEqual([
+				'pkg-a https://example.com/a',
+				'pkg-a get wakeToken',
+			])
+			expect(globalCalls).toEqual([
+				'https://example.com/out',
+				'https://example.com/b',
+				'https://example.com/after',
+			])
+			delete globals[Symbol.for('kody.getSecretAuthority')]
+		} finally {
+			globalThis.fetch = originalFetch
+			String.prototype.trim = originalTrim
 		}
-		expect(stamped()).toBe('pkg-artifact')
-		expect(peek()).toBeNull()
-
-		// constructor.name is package-controlled; null must not break metering
-		// or async ALS selection (intrinsic prototype is used instead).
-		const syncNullCtor = () => peek()
-		Object.defineProperty(syncNullCtor, 'constructor', { value: null })
-		expect(
-			siblingCopy.__kodyMeterStaticPackageExport(
-				'pkg-null-ctor',
-				syncNullCtor,
-			)(),
-		).toBe('pkg-null-ctor')
-
-		const asyncNullCtor = async () => {
-			await Promise.resolve()
-			return peek()
-		}
-		Object.defineProperty(asyncNullCtor, 'constructor', { value: null })
-		expect(
-			await siblingCopy.__kodyMeterStaticPackageExport(
-				'pkg-async-null-ctor',
-				asyncNullCtor,
-			)(),
-		).toBe('pkg-async-null-ctor')
-		expect(peek()).toBeNull()
 	})
 })
 
-test('runtime evaluation replaces a configurable pre-planted authority forge', async () => {
+test('runtime evaluation installs no global secret-authority getter (GHSA-5fv3)', async () => {
 	const authoritySymbol = Symbol.for('kody.getSecretAuthority')
-	const callAuthority = () => {
-		const authority = (
-			globalThis as unknown as Record<symbol, (() => string | null) | undefined>
-		)[authoritySymbol]
-		if (!authority) throw new Error('Expected a secret authority getter.')
-		return authority()
-	}
+	const globals = globalThis as unknown as GlobalSymbols
 	const existing = Object.getOwnPropertyDescriptor(globalThis, authoritySymbol)
-	if (existing && !existing.configurable) {
-		// A prior sealed install already applied — still prove redefine is denied.
-		expect(() =>
-			Object.defineProperty(globalThis, authoritySymbol, {
-				value: () => 'pkg-forged',
-				configurable: true,
-			}),
-		).toThrow(/Cannot redefine|configurable/i)
-		return
+	if (!existing || existing.configurable) {
+		Object.defineProperty(globalThis, authoritySymbol, {
+			value: () => 'pkg-forged',
+			configurable: true,
+			writable: true,
+			enumerable: false,
+		})
 	}
-
-	Object.defineProperty(globalThis, authoritySymbol, {
-		value: () => 'pkg-forged',
-		configurable: true,
-		writable: true,
-		enumerable: false,
-	})
-	expect(callAuthority()).toBe('pkg-forged')
-
-	await withRuntimeIsolationCleanup(async ({ writeRuntimeFile }) => {
-		await import(`${await writeRuntimeFile()}?t=${Date.now()}`)
-		expect(
-			Object.getOwnPropertyDescriptor(globalThis, authoritySymbol)
-				?.configurable,
-		).toBe(false)
-		expect(callAuthority()).not.toBe('pkg-forged')
-	})
+	try {
+		await withRuntimeIsolationCleanup(async ({ writeRuntimeFile }) => {
+			const before = Object.getOwnPropertyDescriptor(
+				globalThis,
+				authoritySymbol,
+			)
+			const mod = (await import(
+				`${await writeRuntimeFile()}?t=${Date.now()}`
+			)) as Record<string, unknown>
+			// Identity no longer flows through this global; the runtime
+			// neither reads nor (re)installs it.
+			expect(
+				Object.getOwnPropertyDescriptor(globalThis, authoritySymbol),
+			).toEqual(before)
+			expect(mod['__kodyGetSecretAuthority']).toBeUndefined()
+		})
+	} finally {
+		const after = Object.getOwnPropertyDescriptor(globalThis, authoritySymbol)
+		if (after?.configurable) delete globals[authoritySymbol]
+	}
 })
 
 test('module secret-authority export ignores a sealed foreign global forge', async () => {
