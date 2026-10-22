@@ -71,6 +71,7 @@ function wallet(
 		configured: true,
 		canSwitchToPro: true,
 		canBuyCredits: true,
+		hasPaidProSubscription: true,
 		balanceMicroUsd: 18_420_000,
 		hasCredits: true,
 		packsCents: [1_000, 2_500, 5_000],
@@ -309,13 +310,66 @@ test('auto-refill on shows its settings, cap notices, and the card note', async 
 	expect(html).not.toContain('Balance at or below $5')
 })
 
-test('eligible wallet that cannot buy shows subscribe, not purchase UI', async () => {
-	const { html } = await renderUsagePage(
-		usage({ credits: wallet({ canBuyCredits: false }) }),
+test('eligible wallet that cannot buy explains paid subscription, not purchase UI', async () => {
+	const { html, text } = await renderUsagePage(
+		usage({
+			credits: wallet({
+				canBuyCredits: false,
+				hasPaidProSubscription: false,
+			}),
+		}),
 	)
-	expect(html).toContain('Subscribe to Pro to add credits.')
+	expect(text).toContain('Buying credits requires a paid Pro subscription.')
+	expect(text).toContain(
+		'A plan grant covers Pro limits and an eligible wallet, but not self-serve top-ups or auto-refill.',
+	)
+	expect(text).toContain(
+		'Start a Pro subscription if you want to buy credits yourself.',
+	)
+	expect(html).toContain('>Start a Pro subscription<')
 	expect(html).not.toContain('Custom amount ($)')
 	expect(html).not.toContain('>$25<')
+})
+
+test('paid Pro without customer does not claim a plan grant', async () => {
+	const { html, text } = await renderUsagePage(
+		usage({
+			credits: wallet({
+				canBuyCredits: false,
+				hasPaidProSubscription: true,
+				canSwitchToPro: true,
+			}),
+		}),
+	)
+	expect(text).toContain(
+		'Buying credits is currently unavailable for this account.',
+	)
+	expect(text).toContain(
+		'Top-ups need a linked Stripe customer on your Pro subscription.',
+	)
+	expect(html).not.toContain('>Start a Pro subscription<')
+	expect(html).not.toContain('Custom amount ($)')
+})
+
+test('unconfigured billing does not blame a missing Stripe customer', async () => {
+	const { text, html } = await renderUsagePage(
+		usage({
+			credits: wallet({
+				configured: false,
+				canBuyCredits: false,
+				hasPaidProSubscription: true,
+				canSwitchToPro: false,
+			}),
+		}),
+	)
+	expect(text).toContain(
+		'Buying credits is currently unavailable for this account.',
+	)
+	expect(text).toContain('Billing is not configured on this deployment.')
+	expect(text).not.toContain(
+		'Top-ups need a linked Stripe customer on your Pro subscription.',
+	)
+	expect(html).not.toContain('>Start a Pro subscription<')
 })
 
 test('credits notice from a top-up shows in the Credits section', async () => {

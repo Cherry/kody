@@ -254,7 +254,11 @@ export type CreditsAlarm = {
 	title: string
 	body: string
 	action: {
-		label: 'Add credits' | 'Subscribe to Pro'
+		/**
+		 * Buy when the account can top up; otherwise open the Credits section
+		 * (self-serve purchases still need a paid Pro subscription).
+		 */
+		label: 'Add credits' | 'Manage credits'
 		href: typeof usageCreditsSectionHref
 	}
 }
@@ -294,6 +298,18 @@ function isAutoRefillCapped(input: {
 }
 
 /**
+ * Why self-serve top-up is blocked when {@link canBuyCredits} is false.
+ * Paid Pro without a Stripe customer is a different failure than a plan grant.
+ */
+export function buyCreditsUnavailableGuidance(
+	hasPaidProSubscription: boolean,
+): string {
+	return hasPaidProSubscription
+		? 'Buying credits is currently unavailable for this account.'
+		: 'Buying credits requires a paid Pro subscription.'
+}
+
+/**
  * The one alarm the usage page may raise. `null` when nothing
  * is at risk, including a funded wallet past its include (that is just
  * credits doing their job) and every account without a wallet.
@@ -303,10 +319,15 @@ export function resolveCreditsAlarm(input: {
 	meters: ReadonlyArray<Pick<IncludedComputeMeter, 'current' | 'include'>>
 	balanceMicroUsd: number
 	canBuyCredits: boolean
+	/**
+	 * Stripe purchasable Pro subscription (may still lack a customer id).
+	 * Defaults false for callers that only know {@link canBuyCredits}.
+	 */
+	hasPaidProSubscription?: boolean
 	autoRefill: CreditsAlarmAutoRefill | null
 }): CreditsAlarm | null {
 	const action = {
-		label: input.canBuyCredits ? 'Add credits' : 'Subscribe to Pro',
+		label: input.canBuyCredits ? 'Add credits' : 'Manage credits',
 		href: usageCreditsSectionHref,
 	} as const
 	const pastInclude = input.meters.some(
@@ -317,6 +338,9 @@ export function resolveCreditsAlarm(input: {
 			meter.include > 0 && meter.current / meter.include >= attentionShare,
 	)
 	const balance = formatMicroUsd(input.balanceMicroUsd)
+	const unavailable = buyCreditsUnavailableGuidance(
+		input.hasPaidProSubscription === true,
+	)
 	switch (input.creditWallet) {
 		case 'none':
 			return null
@@ -328,7 +352,7 @@ export function resolveCreditsAlarm(input: {
 					title: 'Runs past the include are stopped',
 					body: input.canBuyCredits
 						? "This month's include is used up and there are no credits left. Add credits to keep going."
-						: "This month's include is used up and there are no credits left. Subscribe to Pro to add credits.",
+						: `This month's include is used up and there are no credits left. ${unavailable}`,
 					action,
 				}
 			}
@@ -337,7 +361,9 @@ export function resolveCreditsAlarm(input: {
 					kind: 'include_nearly_used_no_credits',
 					tone: 'info',
 					title: "This month's include is nearly used",
-					body: 'With no credits, usage past the include stops. Add credits to keep going past it.',
+					body: input.canBuyCredits
+						? 'With no credits, usage past the include stops. Add credits to keep going past it.'
+						: `With no credits, usage past the include stops. ${unavailable}`,
 					action,
 				}
 			}

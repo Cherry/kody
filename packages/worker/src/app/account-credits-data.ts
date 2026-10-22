@@ -99,6 +99,8 @@ export type AccountCreditsUser = {
 	stableUserId: string
 	stripeCustomerId: string | null
 	entitlement: UserEntitlement
+	/** Paying for the purchasable Pro, independent of Stripe customer id. */
+	hasPaidProSubscription: boolean
 	/** Paying for the purchasable Pro: may buy credits and auto-refill. */
 	canBuyCredits: boolean
 }
@@ -158,6 +160,7 @@ export async function loadAccountCreditsUser(input: {
 			stableUserId: row.stable_user_id,
 			stripeCustomerId,
 			entitlement,
+			hasPaidProSubscription: isPayingForCreditsPro(row),
 			canBuyCredits: canBuyCreditsForUser({
 				row,
 				entitlement,
@@ -185,6 +188,7 @@ export async function loadAccountCreditsUser(input: {
 		stableUserId: input.orgId,
 		stripeCustomerId,
 		entitlement,
+		hasPaidProSubscription: isPayingForCreditsPro(row),
 		canBuyCredits: canBuyCreditsForUser({ row, entitlement, stripeCustomerId }),
 	}
 }
@@ -202,6 +206,8 @@ export async function loadAccountUsageCredits(input: {
 	entitlement: UserEntitlement
 	/** {@link canBuyCreditsForUser}; billing configuration is checked here. */
 	canBuyCredits: boolean
+	/** {@link isPayingForCreditsPro}; independent of Stripe customer id. */
+	hasPaidProSubscription: boolean
 	computeOverage: AccountUsageComputeOverage | null
 	now: Date
 	/** When set, skip the credit_wallets read. */
@@ -251,6 +257,7 @@ export async function loadAccountUsageCredits(input: {
 			configured,
 			canSwitchToPro,
 			canBuyCredits: configured && input.canBuyCredits,
+			hasPaidProSubscription: input.hasPaidProSubscription,
 			balanceMicroUsd: wallet.balanceMicroUsd,
 			hasCredits: input.entitlement.creditWallet === 'funded',
 			packsCents: [...creditTopUpPackCents],

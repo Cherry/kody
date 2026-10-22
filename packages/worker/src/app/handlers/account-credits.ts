@@ -179,7 +179,12 @@ export async function startWebsiteCreditTopUp(input: {
 	})
 	if (!creditsUser?.canBuyCredits || !creditsUser.stripeCustomerId) {
 		return operationResult(
-			{ ok: false, error: 'Subscribe to Pro to add credits.' },
+			{
+				ok: false,
+				error: creditsUser?.hasPaidProSubscription
+					? 'Buying credits is currently unavailable for this account.'
+					: 'Buying credits requires a paid Pro subscription.',
+			},
 			409,
 		)
 	}
@@ -270,7 +275,12 @@ export async function saveWebsiteCreditSettings(input: {
 	})
 	if (!creditsUser?.canBuyCredits) {
 		return operationResult(
-			{ ok: false, error: 'Subscribe to Pro to change credit settings.' },
+			{
+				ok: false,
+				error: creditsUser?.hasPaidProSubscription
+					? 'Changing credit settings is currently unavailable for this account.'
+					: 'Changing credit settings requires a paid Pro subscription.',
+			},
 			409,
 		)
 	}

@@ -42,6 +42,7 @@ import {
 	type CreditAutoRefillSettings,
 	type CreditNotifySettings,
 } from '#universal/credits.ts'
+import { buyCreditsUnavailableGuidance } from '#universal/usage-presentation.ts'
 import {
 	type AccountUsageCredits,
 	type AccountUsageCreditsWallet,
@@ -540,13 +541,30 @@ export function AccountUsageCreditsSection(
 	}
 
 	function renderPurchaseUnavailable(credits: AccountUsageCreditsWallet) {
+		const unavailable = buyCreditsUnavailableGuidance(
+			credits.hasPaidProSubscription,
+		)
+		const detail = !credits.configured
+			? 'Billing is not configured on this deployment.'
+			: credits.hasPaidProSubscription
+				? 'Top-ups need a linked Stripe customer on your Pro subscription.'
+				: 'A plan grant covers Pro limits and an eligible wallet, but not self-serve top-ups or auto-refill.'
 		return (
 			<AccountManagementPanel title="Add credits">
-				<p css={descriptionCss}>Subscribe to Pro to add credits.</p>
-				{credits.canSwitchToPro ? (
-					<div css={accountActionsCss}>
-						{renderSwitchToProButton('Subscribe to Pro')}
-					</div>
+				<p css={descriptionCss}>
+					{unavailable} {detail}
+				</p>
+				{credits.configured &&
+				!credits.hasPaidProSubscription &&
+				credits.canSwitchToPro ? (
+					<>
+						<p css={descriptionCss}>
+							Start a Pro subscription if you want to buy credits yourself.
+						</p>
+						<div css={accountActionsCss}>
+							{renderSwitchToProButton('Start a Pro subscription')}
+						</div>
+					</>
 				) : null}
 			</AccountManagementPanel>
 		)
@@ -580,7 +598,9 @@ export function AccountUsageCreditsSection(
 					<p css={descriptionCss} data-credits-balance-note>
 						{credits.hasCredits
 							? 'Usage past your monthly include is charged from these credits.'
-							: 'With no credits left, usage past your monthly include stops. Add credits to keep going.'}
+							: credits.canBuyCredits
+								? 'With no credits left, usage past your monthly include stops. Add credits to keep going.'
+								: `With no credits left, usage past your monthly include stops. ${buyCreditsUnavailableGuidance(credits.hasPaidProSubscription)}`}
 					</p>
 				</AccountManagementPanel>
 
