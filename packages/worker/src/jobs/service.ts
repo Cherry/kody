@@ -1280,6 +1280,14 @@ async function runRepoBackedJob(input: {
 			artifact: loadedArtifact.artifact,
 			rowPublishedCommit: loadedArtifact.row?.publishedCommit,
 			currentPublishedCommit: resolved.source.published_commit,
+		}) &&
+		// Pre-fix bundles that inline other packages rebuild once so each
+		// package's fetch acts as that package (GHSA-5fv3-qv7j-rqf5). Without
+		// this, a scheduled job keeps running the stored bundle and an inlined
+		// dependency's fetch acts as the job's package.
+		!publishedArtifactNeedsPackageBindingRebuild({
+			artifact: loadedArtifact.artifact,
+			sourceFiles: resolved.files,
 		})
 	) {
 		return await executePublishedJobArtifact({
