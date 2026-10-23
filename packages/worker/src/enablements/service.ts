@@ -18,6 +18,12 @@ import {
 	type ArmJobForEnablementResult,
 } from '#worker/jobs/arm-job-for-enablement.ts'
 import { buildPackageJobId } from '#worker/jobs/package-job-id.ts'
+import {
+	deliverPlannedEnablementToggle,
+	planEnablementToggle,
+	plannedEnablementToggleStatements,
+	toggleActorFromRequest,
+} from '#worker/jobs/toggle-audit.ts'
 import { resolveSavedPackage } from '#worker/package-invocations/module-artifacts.ts'
 import {
 	listPackageSubscriptions,
@@ -43,7 +49,7 @@ import {
 	buildEnablementInsertedGuardStatement,
 	buildInsertEnablementStatement,
 	buildInsertWebhookEnablementStatement,
-	disableEnablement,
+	buildDisableEnablementStatement,
 	emailSenderEnablementConflictMessage,
 	findLiveEmailSenderEnablement,
 	getEnablementById,
@@ -745,7 +751,25 @@ export async function enableTriggerForCaller(input: {
 			}; enablementEnable cannot do it.`,
 		)
 	}
-	await runNewEnablementPlans({ db: input.env.APP_DB, plans: [plan] })
+	const toggle = planEnablementToggle({
+		env: input.env,
+		request: input.request,
+		enablement: {
+			id: plan.enablementId,
+			orgId: plan.orgId,
+			triggerKind: plan.kind,
+			triggerName: plan.triggerName,
+			instanceId: plan.instanceId,
+		},
+		from: 'off',
+		to: 'on',
+	})
+	await runNewEnablementPlans({
+		db: input.env.APP_DB,
+		plans: [plan],
+		after: plannedEnablementToggleStatements(toggle),
+	})
+	await deliverPlannedEnablementToggle(toggle)
 	const created = await getEnablementById({
 		db: input.env.APP_DB,
 		orgId: savedPackage.userId,
@@ -785,6 +809,8 @@ export async function armCronJobForCallerEnablement(input: {
 		env: input.env,
 		orgId: enablement.orgId,
 		jobId: enablement.instanceId,
+		actor: toggleActorFromRequest(input.request),
+		enablementId: enablement.id,
 	})
 }
 
@@ -822,6 +848,8 @@ export async function disableEnablementForCaller(input: {
 	env: Env
 	request: RequestContext
 	enablementId: string
+	/** Why it was turned off, recorded in the org audit log. */
+	reason?: string | null
 }): Promise<EnablementRecord> {
 	const actor = requireActor(input.request)
 	const db = input.env.APP_DB
@@ -843,7 +871,20 @@ export async function disableEnablementForCaller(input: {
 		// Someone else's enablement is invisible to non-Owners.
 		if (!access.isOwner) throw notFound
 	}
-	await disableEnablement({ db, orgId, id: enablement.id })
+	const toggle = planEnablementToggle({
+		env: input.env,
+		request: input.request,
+		enablement,
+		from: enablement.state,
+		to: 'off',
+		reason: input.reason,
+	})
+	// The audit row commits with the turn-off and only when it changed a row.
+	await db.batch([
+		buildDisableEnablementStatement({ db, orgId, id: enablement.id }),
+		...plannedEnablementToggleStatements(toggle, { onlyIfChanged: true }),
+	])
+	await deliverPlannedEnablementToggle(toggle)
 	const updated = await getEnablementById({ db, orgId, id: enablement.id })
 	if (!updated) throw notFound
 	return updated
