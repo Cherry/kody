@@ -35,10 +35,10 @@ fall back to `npm install` and do not commit the lockfile it rewrites.
 Playwright's Chromium (used by `npm run test:e2e:run` / `validate`) is
 pre-installed in `~/.cache/ms-playwright` and persists in the VM snapshot, so
 normally nothing extra is needed. The **non-obvious gotcha**:
-`playwright install` (and `test:e2e:ensure`) **hangs** on this VM kernel — its
-Node-based zip extractor stalls on an `io_uring` write partway through (around
-`libwidevinecdm.so`), and `UV_USE_IO_URING=0` does not stop it. The browser zip
-downloads fine; only the built-in extraction hangs.
+`playwright install` **hangs** on this VM kernel — its Node-based zip extractor
+stalls on an `io_uring` write partway through (around `libwidevinecdm.so`), and
+`UV_USE_IO_URING=0` does not stop it. The browser zip downloads fine; only the
+built-in extraction hangs.
 
 If browsers are ever missing (e.g. a Playwright version bump changes the
 revision), do **not** rely on `playwright install`. Run
