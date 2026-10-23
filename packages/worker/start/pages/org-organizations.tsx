@@ -106,9 +106,21 @@ export function OrganizationsPage({
 								key: org.slug,
 								slug: org.slug,
 								displayName: org.displayName,
+								// The org avatar route only serves live orgs, so deleted rows
+								// keep the initial fallback.
 								personal: false,
 								viewer: data.viewer,
-								detail: `Deleted ${formatTimestampDate(org.deletedAt)}`,
+								detail: (
+									<>
+										Deleted {formatTimestampDate(org.deletedAt)}
+										{org.restoreUntil ? (
+											<>
+												{' · Restorable until '}
+												{formatTimestampDate(org.restoreUntil)}
+											</>
+										) : null}
+									</>
+								),
 								pills: [{ label: 'Deleted', tone: 'quiet' }],
 								testId: 'restorable-organization',
 								trailing: (
@@ -408,6 +420,7 @@ function renderOrgRow(input: {
 	key: string
 	slug: string
 	displayName: string | null
+	avatarUrl?: string | null
 	personal: boolean
 	viewer: OrgViewer
 	detail: ReactNode
@@ -481,6 +494,7 @@ function renderOrganizationList(data: AccountOrganizationsLoaderData) {
 					key: org.slug,
 					slug: org.slug,
 					displayName: org.displayName,
+					avatarUrl: org.avatarUrl,
 					personal: org.personal,
 					viewer: data.viewer,
 					detail: orgRoleLabel(org.role),
