@@ -75,10 +75,10 @@ export function mapCommunityListingRow(
 	}
 }
 
-const communityForkSelectColumns = `id, listing_id, forker_user_id, origin_commit, forked_package_id,
+export const communityForkSelectColumns = `id, listing_id, forker_user_id, origin_commit, forked_package_id,
 	forked_source_id, target_kody_id, created_at, adopted_at, adoption_note`
 
-function mapCommunityForkRow(
+export function mapCommunityForkRow(
 	row: Record<string, unknown>,
 ): CommunityForkRecord {
 	return {
