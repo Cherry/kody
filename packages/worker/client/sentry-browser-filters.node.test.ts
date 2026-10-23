@@ -188,10 +188,26 @@ test('individual browser Sentry filters drop AbortError, Firefox Xray, and injec
 test('filterBrowserSentryEvent drops third-party and platform noise and keeps real errors', () => {
 	const dropped: Array<Case> = [
 		['Error', 'AbortError: The user aborted a request.'],
-		// Fathom script DOM crash.
+		// Fathom script DOM crash (removeChild: KODY-CLOUDFLARE-3Q / 4C).
 		[
 			'TypeError',
 			"Cannot read properties of null (reading 'removeChild')",
+			[{ abs_path: 'https://cdn.usefathom.com/script.js' }],
+		],
+		// Fathom appendChild-on-null twin (KODY-AJ / issue 7807558933).
+		[
+			'TypeError',
+			"Cannot read properties of null (reading 'appendChild')",
+			[{ abs_path: 'https://cdn.usefathom.com/script.js' }],
+		],
+		[
+			'TypeError',
+			"Cannot read properties of null (reading 'appendChild')",
+			[{ filename: '/script.js' }],
+		],
+		[
+			'TypeError',
+			"null is not an object (evaluating 'n.appendChild(e)')",
 			[{ abs_path: 'https://cdn.usefathom.com/script.js' }],
 		],
 		// Chrome extension noise families.
@@ -468,6 +484,17 @@ test('filterBrowserSentryEvent drops third-party and platform noise and keeps re
 			'TypeError',
 			"Cannot read properties of null (reading 'removeChild')",
 			[appChunk],
+		],
+		// Same appendChild wording with only Kody frames must stay visible.
+		[
+			'TypeError',
+			"Cannot read properties of null (reading 'appendChild')",
+			[appChunk],
+		],
+		[
+			'TypeError',
+			"null is not an object (evaluating 'n.appendChild(e)')",
+			[kodyEntry],
 		],
 		['UnhandledRejection', 'something else entirely'],
 		['Error', 'Could not establish connection to the MCP server.'],
@@ -815,6 +842,51 @@ test('filterBrowserSentryEvent drops third-party and platform noise and keeps re
 	expect(filterBrowserSentryEvent(emptyEvent, cspUnsafeEvalMessage)).toBe(
 		emptyEvent,
 	)
+})
+
+test('Fathom DOM-null filter does not pair message and frames across exception values', () => {
+	// App appendChild wording on one value + Fathom frames only on another
+	// must stay visible (CodeRabbit on #4221).
+	const crossValueEvent = {
+		exception: {
+			values: [
+				{
+					type: 'TypeError',
+					value: "Cannot read properties of null (reading 'appendChild')",
+					stacktrace: { frames: [kodyEntry] },
+				},
+				{
+					type: 'TypeError',
+					value: 'unrelated',
+					stacktrace: {
+						frames: [{ abs_path: 'https://cdn.usefathom.com/script.js' }],
+					},
+				},
+			],
+		},
+	}
+	expect(filterBrowserSentryEvent(crossValueEvent)).toBe(crossValueEvent)
+
+	// Linked app Error + Fathom removeChild cause must stay visible.
+	const linkedEvent = {
+		exception: {
+			values: [
+				{
+					type: 'TypeError',
+					value: "Cannot read properties of null (reading 'removeChild')",
+					stacktrace: {
+						frames: [{ abs_path: 'https://cdn.usefathom.com/script.js' }],
+					},
+				},
+				{
+					type: 'Error',
+					value: 'Account settings failed',
+					stacktrace: { frames: [kodyEntry] },
+				},
+			],
+		},
+	}
+	expect(filterBrowserSentryEvent(linkedEvent)).toBe(linkedEvent)
 })
 
 test('isTanStackServerFnFetchNetworkError requires serverFn stack evidence', () => {
