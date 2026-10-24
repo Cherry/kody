@@ -4,7 +4,10 @@ import {
 	jobAuditActions,
 	recordJobAudit,
 } from './job-audit.ts'
-import { optionalOrgAuditWriter } from '#worker/orgs/org-audit.ts'
+import {
+	optionalOrgAuditWriter,
+	orgAuditCauseFromCaller,
+} from '#worker/orgs/org-audit.ts'
 import {
 	type OwnerId,
 	type PersonId,
@@ -178,8 +181,13 @@ export { getJob, getJobInspection, inspectJobsForUser, listJobs }
 function requirePersistableJobCallerContext(
 	callerContext: McpCallerContext,
 ): PersistedJobCallerContext {
-	const { orgBinding: _derivedAtRequestTime, ...wire } =
-		parseMcpCallerContextWire(callerContext)
+	// The chain depth belongs to the run that saved the job, not to its
+	// later scheduled runs.
+	const {
+		orgBinding: _derivedAtRequestTime,
+		resourceEventDepth: _resourceEventDepth,
+		...wire
+	} = parseMcpCallerContextWire(callerContext)
 	if (!wire.user) {
 		throw new Error('Authenticated MCP user is required for job operations.')
 	}
@@ -1099,6 +1107,7 @@ export async function updateJob(input: {
 					optionalOrgAuditWriter(
 						input.env,
 						input.callerContext.request ?? null,
+						orgAuditCauseFromCaller(input.callerContext),
 					),
 					{
 						orgId: ownerId,
@@ -1125,6 +1134,7 @@ export async function updateJob(input: {
 							from: 'off',
 							to: 'on',
 							reason: 'Turned on with its job.',
+							cause: orgAuditCauseFromCaller(input.callerContext),
 						}),
 				})
 			}
@@ -1158,6 +1168,11 @@ export async function updateJob(input: {
 					reason:
 						normalizeToggleReason(input.body.reason) ??
 						(forcedOffByExpiry ? jobExpiredDisabledReason : null),
+					disabledReason: {
+						before: existing.disabledReason ?? null,
+						after: updated.disabledReason ?? null,
+					},
+					cause: orgAuditCauseFromCaller(input.callerContext),
 				})
 			}
 			return toJobView(updated)
