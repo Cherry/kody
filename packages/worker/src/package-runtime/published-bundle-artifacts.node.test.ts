@@ -88,6 +88,18 @@ const mockModule = vi.hoisted(() => ({
 			return await mockModule.insertPublishedBundleArtifactRow(db, input)
 		},
 	),
+	upsertPublishedBundleArtifactRows: vi.fn(
+		async (
+			db: unknown,
+			inputs: ReadonlyArray<{ userId: string; sourceId: string }>,
+		) => {
+			const ids: Array<string | null> = []
+			for (const input of inputs) {
+				ids.push(await mockModule.upsertPublishedBundleArtifactRow(db, input))
+			}
+			return ids
+		},
+	),
 	writePublishedBundleArtifact: vi.fn(),
 }))
 
@@ -126,6 +138,11 @@ vi.mock('#worker/repo/published-bundle-artifacts-repo.ts', async () => {
 				typeof PublishedBundleArtifactRepo.upsertPublishedBundleArtifactRow
 			>
 		) => mockModule.upsertPublishedBundleArtifactRow(...args),
+		upsertPublishedBundleArtifactRows: (
+			...args: Parameters<
+				typeof PublishedBundleArtifactRepo.upsertPublishedBundleArtifactRows
+			>
+		) => mockModule.upsertPublishedBundleArtifactRows(...args),
 	}
 })
 
@@ -264,7 +281,8 @@ function makeRebuildInput(input: {
 function stubFreshRebuildPersistence(kvKey = 'kv:key') {
 	mockModule.getPublishedBundleArtifactByIdentity.mockResolvedValue(null)
 	mockModule.writePublishedBundleArtifact.mockResolvedValue(kvKey)
-	mockModule.insertPublishedBundleArtifactRow.mockResolvedValue(undefined)
+	// D1 upsert must return an id before KV is written.
+	mockModule.insertPublishedBundleArtifactRow.mockResolvedValue('row-id')
 }
 
 test('isPublishedBundleArtifactCurrentForCommit rejects prior-commit leftovers', async () => {
