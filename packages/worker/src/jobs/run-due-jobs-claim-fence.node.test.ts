@@ -354,18 +354,28 @@ test('scheduled package job claims carry package identity and the published sour
 		userId: record.userId,
 		packageId,
 	})
-	expect(claimRunRecord).toHaveBeenCalledWith({
-		env: expect.anything(),
-		userId: record.userId,
-		context: expect.objectContaining({
-			surface: 'job',
-			jobId: record.id,
-			packageId,
-			kodyId: 'tesla-solar',
-			sourceId: record.sourceId,
-			publishedCommit: 'published-package-commit',
+	expect(claimRunRecord).toHaveBeenCalledWith(
+		expect.objectContaining({
+			env: expect.anything(),
+			userId: record.userId,
+			// No persisted caller blob: started_by comes from the enablement.
+			request: expect.objectContaining({
+				actor: {
+					userId: personIdFromStored('user-fenced'),
+					username: 'fenced',
+				},
+				credential: expect.objectContaining({ kind: 'schedule' }),
+			}),
+			context: expect.objectContaining({
+				surface: 'job',
+				jobId: record.id,
+				packageId,
+				kodyId: 'tesla-solar',
+				sourceId: record.sourceId,
+				publishedCommit: 'published-package-commit',
+			}),
 		}),
-	})
+	)
 
 	claimRunRecord.mockClear()
 	retryClaimedJobRow.mockResolvedValue(true)
@@ -824,6 +834,7 @@ test('a hung Workers cancellation settles the claimed job as a visible failure',
 				triageNote: null,
 				triagedAt: null,
 				triagedBy: null,
+				startedBy: null,
 				metadata: { scheduledFor: record.nextRunAt },
 				logCount: 0,
 			},
@@ -852,6 +863,7 @@ test('a hung Workers cancellation settles the claimed job as a visible failure',
 				triageNote: null,
 				triagedAt: null,
 				triagedBy: null,
+				startedBy: null,
 				metadata: { scheduledFor: '2026-07-30T18:00:00.000Z' },
 				logCount: 0,
 			},
@@ -1038,6 +1050,7 @@ test('settleHungDueJobsForUser skips claim finalize when finishing a running run
 				triageNote: null,
 				triagedAt: null,
 				triagedBy: null,
+				startedBy: null,
 				metadata: { scheduledFor: record.nextRunAt },
 				logCount: 0,
 			},
@@ -1102,6 +1115,7 @@ test('settleHungDueJobsForUser pages through running runs before finalizing', as
 					triageNote: null,
 					triagedAt: null,
 					triagedBy: null,
+					startedBy: null,
 					metadata: { scheduledFor: record.nextRunAt },
 					logCount: 0,
 				},
@@ -1135,6 +1149,7 @@ test('settleHungDueJobsForUser pages through running runs before finalizing', as
 					triageNote: null,
 					triagedAt: null,
 					triagedBy: null,
+					startedBy: null,
 					metadata: { scheduledFor: record.nextRunAt },
 					logCount: 0,
 				},

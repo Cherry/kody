@@ -86,6 +86,7 @@ import {
 	isTransientJobExecutionError,
 	markPreExecutionTransientError,
 	resolveScheduledJobCallerContext,
+	resolveScheduledJobRunRequest,
 	TransientJobExecutionError,
 } from './execution-safety.ts'
 import {
@@ -1835,9 +1836,14 @@ async function executeClaimedScheduledJobRun(input: {
 	}).catch((error: unknown) => {
 		throw markPreExecutionTransientError(error)
 	})
+	const jobRequest = resolveScheduledJobRunRequest({
+		callerContext: input.row.callerContext,
+		source: input.source,
+	})
 	const claim = await claimRunRecord({
 		env: input.env,
 		userId: input.row.record.userId,
+		request: jobRequest,
 		context: {
 			surface: 'job',
 			name: input.row.record.name,
