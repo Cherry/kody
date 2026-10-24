@@ -312,6 +312,7 @@ vi.mock('#worker/credentials/credential-fields.ts', async (importOriginal) => {
 
 vi.mock('#worker/orgs/org-audit.ts', () => ({
 	orgAuditWriterFromRequest: () => ({ audit: 'writer' }),
+	recordOrgAuditEvent: async () => {},
 }))
 
 vi.mock('#worker/integrations/service.ts', async (importOriginal) => {
