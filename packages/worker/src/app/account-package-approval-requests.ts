@@ -277,6 +277,8 @@ export async function approveCredentialNeedsRequest(input: {
 				allowLockedPublish: true,
 				credentialNeedsApproved: true,
 				expectedHeadCommit: approval.pendingCommit,
+				// The app runs as whoever pushed, not as the approver.
+				requestedByUserId: approval.requestedByUserId ?? null,
 				rebuildPackageArtifacts: true,
 			})
 		} catch (error) {
@@ -317,6 +319,8 @@ export async function approveCredentialNeedsRequest(input: {
 			...readPausedExternalPublish(approval.details),
 			allowLockedPublish: true,
 			credentialNeedsApproved: true,
+			// The app runs as whoever pushed, not as the approver.
+			requestedByUserId: approval.requestedByUserId,
 			baseUrl: getAppBaseUrl({
 				env: input.env,
 				requestUrl: input.request.url,
