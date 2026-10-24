@@ -5,10 +5,14 @@ import { inheritRequest } from '#worker/request-context/request-context.ts'
 import { runWithDynamicWorkerEvaluationBudget } from '#mcp/executor.ts'
 import { runBundledModuleWithRegistry } from '#mcp/run-kody-registry.ts'
 import { resolveBackgroundMcpUser } from '#worker/identity/background-mcp-user.ts'
-import { getSavedPackageById } from '#worker/package-registry/repo.ts'
-import { getEntitySourceById } from '#worker/repo/entity-sources.ts'
+import { listSavedPackagesByIds } from '#worker/package-registry/repo.ts'
+import { listEntitySourcesByIds } from '#worker/repo/entity-sources.ts'
 import { type EntitySourceRow } from '#worker/repo/types.ts'
-import { loadPublishedBundleArtifactByIdentity } from '#worker/package-runtime/published-bundle-artifacts.ts'
+import {
+	loadPublishedBundleArtifactsByIdentities,
+	publishedBundleLoadIdentityKey,
+	type LoadedPublishedBundleArtifact,
+} from '#worker/package-runtime/published-bundle-artifacts.ts'
 import { isUnrepairablePreBindingArtifact } from '#worker/package-runtime/pre-binding-artifact-repair.ts'
 import { type PublishedBundleArtifact } from '#worker/package-runtime/published-runtime-artifacts.ts'
 import { type SavedPackageRecord } from '#worker/package-registry/types.ts'
@@ -122,6 +126,73 @@ async function resolveRunnableRetrieverArtifact(input: {
 	return ensured.artifact
 }
 
+type RetrieverPrefetch = {
+	savedPackagesById: Map<string, SavedPackageRecord>
+	sourcesById: Map<string, EntitySourceRow>
+	artifactsByIdentity: Map<string, LoadedPublishedBundleArtifact | null>
+}
+
+function shouldInvokeRetrieverEntry(input: {
+	scope: PackageRetrieverScope
+	includeHiddenPackages: boolean
+	savedPackage: SavedPackageRecord | undefined
+}) {
+	if (!input.savedPackage) return false
+	// Hidden gating is a search-discovery preference only. Context retrievers
+	// (memory/tool context) must still run for hidden packages.
+	if (
+		input.scope === 'search' &&
+		input.savedPackage.hidden &&
+		!input.includeHiddenPackages
+	) {
+		return false
+	}
+	return true
+}
+
+async function prefetchRetrieverLookups(input: {
+	env: Env
+	userId: string
+	scope: PackageRetrieverScope
+	includeHiddenPackages: boolean
+	entries: ReadonlyArray<PackageRetrieverManifestCacheEntry>
+}): Promise<RetrieverPrefetch> {
+	const packageIds = [...new Set(input.entries.map((entry) => entry.packageId))]
+	const packages = await listSavedPackagesByIds(input.env.APP_DB, {
+		userId: input.userId,
+		packageIds,
+	})
+	const savedPackagesById = new Map(
+		packages.map((savedPackage) => [savedPackage.id, savedPackage]),
+	)
+	const runnableEntries = input.entries.filter((entry) =>
+		shouldInvokeRetrieverEntry({
+			scope: input.scope,
+			includeHiddenPackages: input.includeHiddenPackages,
+			savedPackage: savedPackagesById.get(entry.packageId),
+		}),
+	)
+	const sourceIds = [...new Set(runnableEntries.map((entry) => entry.sourceId))]
+	const [sources, artifactsByIdentity] = await Promise.all([
+		listEntitySourcesByIds(input.env.APP_DB, sourceIds),
+		loadPublishedBundleArtifactsByIdentities({
+			env: input.env,
+			userId: input.userId,
+			identities: runnableEntries.map((entry) => ({
+				sourceId: entry.sourceId,
+				kind: 'module',
+				artifactName: entry.exportName,
+				entryPoint: entry.entryPoint,
+			})),
+		}),
+	])
+	return {
+		savedPackagesById,
+		sourcesById: new Map(sources.map((source) => [source.id, source])),
+		artifactsByIdentity,
+	}
+}
+
 async function invokeRetriever(input: {
 	env: Env
 	baseUrl: string
@@ -131,6 +202,7 @@ async function invokeRetriever(input: {
 	entry: PackageRetrieverManifestCacheEntry
 	query: string
 	includeHiddenPackages: boolean
+	prefetch: RetrieverPrefetch
 	memoryContext?: {
 		task?: string
 		query?: string
@@ -140,26 +212,22 @@ async function invokeRetriever(input: {
 	conversationId?: string
 	waitUntil?: (promise: Promise<unknown>) => void
 }) {
-	const savedPackage = await getSavedPackageById(input.env.APP_DB, {
-		userId: input.userId,
-		packageId: input.entry.packageId,
-	})
-	if (!savedPackage) {
-		return []
-	}
-	// Hidden gating is a search-discovery preference only. Context retrievers
-	// (memory/tool context) must still run for hidden packages.
+	const savedPackage = input.prefetch.savedPackagesById.get(
+		input.entry.packageId,
+	)
 	if (
-		input.scope === 'search' &&
-		savedPackage.hidden &&
-		!input.includeHiddenPackages
+		!shouldInvokeRetrieverEntry({
+			scope: input.scope,
+			includeHiddenPackages: input.includeHiddenPackages,
+			savedPackage,
+		})
 	) {
 		return []
 	}
-	const source = await getEntitySourceById(
-		input.env.APP_DB,
-		input.entry.sourceId,
-	)
+	if (!savedPackage) {
+		return []
+	}
+	const source = input.prefetch.sourcesById.get(input.entry.sourceId)
 	if (
 		!source ||
 		!source.published_commit ||
@@ -167,14 +235,14 @@ async function invokeRetriever(input: {
 	) {
 		return []
 	}
-	const loaded = await loadPublishedBundleArtifactByIdentity({
-		env: input.env,
-		userId: input.userId,
-		sourceId: input.entry.sourceId,
-		kind: 'module',
-		artifactName: input.entry.exportName,
-		entryPoint: input.entry.entryPoint,
-	})
+	const loaded = input.prefetch.artifactsByIdentity.get(
+		publishedBundleLoadIdentityKey({
+			sourceId: input.entry.sourceId,
+			kind: 'module',
+			artifactName: input.entry.exportName,
+			entryPoint: input.entry.entryPoint,
+		}),
+	)
 	if (!loaded?.artifact) {
 		return []
 	}
@@ -317,6 +385,13 @@ export async function runPackageRetrievers(input: {
 			scope: input.scope,
 		})
 	).slice(0, input.maxProviders ?? (input.scope === 'context' ? 3 : 10))
+	const prefetch = await prefetchRetrieverLookups({
+		env: input.env,
+		userId,
+		scope: input.scope,
+		includeHiddenPackages,
+		entries,
+	})
 	// Soft-fail per retriever: one stalled/buggy package must not fail MCP
 	// `search` or pre-sandbox execute memory/context enrichment. Callers already
 	// surface `warnings` to agents. This wrap creates a request budget only
@@ -335,6 +410,7 @@ export async function runPackageRetrievers(input: {
 						entry,
 						query,
 						includeHiddenPackages,
+						prefetch,
 						memoryContext: input.memoryContext,
 						conversationId: input.conversationId,
 						waitUntil: input.waitUntil,
