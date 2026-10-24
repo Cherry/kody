@@ -96,7 +96,7 @@ const metaSchemaVersionKey = 'schema_version'
 /** YYYYMMDD coverage floor for warm v12→v13 (no backfill). Fresh DOs omit this. */
 const metaRunDayCountsSinceKey = 'run_day_counts_since'
 /** Bump when initializeSchema's DDL set changes; warm objects skip DDL. */
-const runLogSchemaVersion = 15
+const runLogSchemaVersion = 16
 
 function utcDayToMetaInt(day: string): number {
 	return Number(day.replaceAll('-', ''))
@@ -1038,6 +1038,9 @@ class RunLogBase extends DurableObject<Env> {
 			`CREATE INDEX IF NOT EXISTS idx_run_day_counts_day
 			ON run_day_counts(day)`,
 		)
+		if (installedVersion != null && installedVersion < 16) {
+			this.migrateRetrieverRunsForV16()
+		}
 		// Warm objects only: record the migration UTC day as the coverage floor.
 		// Fresh objects keep a null boundary (no partial-history note).
 		if (installedVersion != null && installedVersion < 13) {
@@ -1174,6 +1177,26 @@ class RunLogBase extends DurableObject<Env> {
 				// Column already present on a partially migrated object.
 			}
 		}
+	}
+
+	private migrateRetrieverRunsForV16() {
+		this.transactionSyncWithMetaCache(() => {
+			const runCount = this.getMeta(metaRunCountKey)
+			this.ctx.storage.sql.exec(`
+				DELETE FROM run_logs
+				WHERE run_id IN (SELECT id FROM runs WHERE surface = 'retriever')
+			`)
+			this.ctx.storage.sql.exec(`DELETE FROM runs WHERE surface = 'retriever'`)
+			this.ctx.storage.sql.exec(
+				`DELETE FROM run_day_counts WHERE surface = 'retriever'`,
+			)
+			if (runCount != null) {
+				const countRow = this.ctx.storage.sql
+					.exec<{ n: number }>(`SELECT COUNT(*) AS n FROM runs`)
+					.one()
+				this.setMeta(metaRunCountKey, Number(countRow.n ?? 0) || 0)
+			}
+		})
 	}
 
 	private getMeta(key: string): number | null {
@@ -1848,7 +1871,7 @@ class RunLogBase extends DurableObject<Env> {
 			'reconcileStaleRunning',
 			`SELECT id, started_at, surface, idempotency_key FROM runs
 			WHERE status = 'running' AND (
-				(surface IN ('execute', 'export', 'retriever', 'subscription', 'app_fetch', 'app_realtime')
+				(surface IN ('execute', 'export', 'subscription', 'app_fetch', 'app_realtime')
 					AND started_at < ?)
 				OR (surface = 'webhook' AND started_at < ?)
 				OR (surface = 'job' AND started_at < ?)
