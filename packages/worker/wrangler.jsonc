@@ -1313,7 +1313,7 @@
 				},
 			],
 			// Like the D1 database above, the test env reuses the preview
-			// bucket name; local runs and vitest-pool-workers simulate it.
+			// bucket name; local runs and vitest-plugin simulate it.
 			"r2_buckets": [
 				{
 					"binding": "COMMUNITY_ASSETS",

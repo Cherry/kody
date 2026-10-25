@@ -707,7 +707,7 @@ protocol. Sender identities accept only `verified` rows, and
 - Bucket names: `kody-email-blobs` (production), per-preview
   `{worker}-email-blobs` buckets created and cleaned up by
   `tools/ci/preview-resources.ts`, and the test env reuses the preview-style
-  name locally (Wrangler/vitest-pool-workers simulate the bucket).
+  name locally (Wrangler/vitest-plugin simulate the bucket).
 
 RepoSession `@cloudflare/shell` Workspace objects above the inline threshold
 (~1.5 MiB) live in `REPO_SESSION_BLOBS`. This is session scratch, not a

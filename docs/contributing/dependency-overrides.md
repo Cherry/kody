@@ -298,9 +298,9 @@ handles those errors and repo-session tests pass against it.
 
 ### `zod` → `4.6.6`
 
-Pins a single Zod copy across the workspace. Without this override,
-`@cloudflare/vitest-pool-workers@0.22.0` (exact `zod@4.4.3`) and `@kody/worker`
-(`zod@^4.6.6`) resolve two trees, and the Worker-local copy misses
+Pins a single Zod copy across the workspace. `@cloudflare/vitest-plugin` pins an
+exact `zod` version, so without this override it and `@kody/worker`
+(`zod@^4.6.6`) can resolve two trees, and the Worker-local copy misses
 `patches/zod+4.6.6.patch`, which trims `zod/v4/locales` to English-only and
 strips unused `compile` / `fromJSONSchema` / `deepPartial` barrel exports for
 the startup budget. Keep this pin aligned with the Worker Zod range and refresh

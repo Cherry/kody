@@ -112,7 +112,7 @@
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
     "@cloudflare/vite-plugin": "^1.62.5",
-    "@cloudflare/vitest-pool-workers": "^0.22.0",
+    "@cloudflare/vitest-plugin": "^1.4.7",
     "@cloudflare/workers-types": "^5.20261003.1",
     "@emotion/cache": "^11.14.0",
     "@epic-web/config": "^3.2.1",
