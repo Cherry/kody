@@ -857,6 +857,9 @@ function defaultRunNpmScript(
 	cwd?: string,
 	paths: ReadonlyArray<string> = [],
 ): Promise<number> {
+	// Node refuses to spawn `npm.cmd` without a shell on Windows. Args are
+	// script names and repo paths, not user input.
+	const shell = process.platform === 'win32'
 	return new Promise((resolve) => {
 		const child = script.startsWith('vitest related --project ')
 			? spawn(
@@ -876,6 +879,7 @@ function defaultRunNpmScript(
 						stdio: 'inherit',
 						env: { ...gitHookScriptEnv(), CI: '1' },
 						cwd,
+						shell,
 					},
 				)
 			: script.startsWith('node ')
@@ -888,6 +892,7 @@ function defaultRunNpmScript(
 						stdio: 'inherit',
 						env: gitHookScriptEnv(),
 						cwd,
+						shell,
 					})
 		child.once('error', (error) => {
 			console.error(error.message)

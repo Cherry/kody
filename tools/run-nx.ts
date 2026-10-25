@@ -177,6 +177,8 @@ export function spawnNx(
 		const child = spawn(resolveLocalBinary('nx'), [...args], {
 			env: envWithNodeHeapFloor(env ?? process.env),
 			stdio: ['inherit', 'pipe', 'pipe'],
+			// Node refuses to spawn `nx.cmd` without a shell on Windows.
+			shell: process.platform === 'win32',
 		})
 		function forward(
 			stream: NodeJS.ReadableStream | null,
