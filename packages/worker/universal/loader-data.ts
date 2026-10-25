@@ -2936,7 +2936,12 @@ export type PackageAppOauthConsentLoaderData = {
 	kodyId: string
 	redirectUri: string
 	scopes: Array<string>
+	requiredScopes: Array<string>
+	alreadyAllowedScopes: Array<string>
+	requiredLabels: Array<string>
 	claimLabels: Array<string>
+	optionalScopes: Array<{ scope: string; label: string }>
+	alreadyAllowedLabels: Array<string>
 	hiddenFields: Record<string, string>
 }
 
@@ -3352,7 +3357,7 @@ export type AccountConnectedAppView = {
 	publisherName: string
 	iconUrl: string | null
 	/** What the app may see or use, in plain words. */
-	allows: Array<string>
+	allows: Array<{ label: string; scope: string | null }>
 	connectedAt: string
 	lastUsedAt: string | null
 }

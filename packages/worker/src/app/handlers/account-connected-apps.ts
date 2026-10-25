@@ -3,10 +3,14 @@ import { operationResult } from '#app/operation-result.ts'
 import { packageAppOauthClaimLabels } from '#app/package-app-oauth-consent-copy.ts'
 import {
 	listLivePackageAppOauthGrantsForPerson,
+	revokePackageAppOauthGrantScope,
 	revokePackageAppOauthGrantsForPersonApp,
 	type PackageAppOauthGrant,
 } from '#app/package-app-oauth-grants.ts'
-import { visitorNeedKeysOfScopes } from '#app/package-app-oauth-scopes.ts'
+import {
+	readPackageAppOauthScope,
+	visitorNeedKeysOfScopes,
+} from '#app/package-app-oauth-scopes.ts'
 import { resolvePackageAppOrgOwnerByHandle } from '#app/package-app-owner.ts'
 import { deleteMcpEventSubscriptionsForOauthClient } from '#mcp/events/subscriptions-repo.ts'
 import { resolvePackageListIconUrl } from '#universal/identity-icon-urls.ts'
@@ -105,6 +109,11 @@ export async function loadAccountConnectedAppsData(input: {
 
 const connectedAppLookupConcurrency = 8
 
+function isOptionalPackageAppScope(scope: string) {
+	const parsed = readPackageAppOauthScope(scope)
+	return parsed !== null && parsed !== 'profile'
+}
+
 async function describeAppGrant(
 	env: Env,
 	grant: PackageAppOauthGrant,
@@ -155,12 +164,19 @@ async function describeAppGrant(
 	} catch {
 		// The grant still lists (and can be revoked) when the app is gone.
 	}
+	const orderedScopes = [...grant.scopes].sort()
+	const optionalScopes = orderedScopes.filter(isOptionalPackageAppScope)
 	return {
 		appKey: `${grant.orgUsername}/${grant.kodyId}`,
 		appName,
 		publisherName,
 		iconUrl,
-		allows: packageAppOauthClaimLabels(grant.scopes, needDescriptions),
+		allows: packageAppOauthClaimLabels(orderedScopes, needDescriptions).map(
+			(label, index) => ({
+				label,
+				scope: index < 2 ? null : (optionalScopes[index - 2] ?? null),
+			}),
+		),
 		connectedAt: grant.createdAt,
 		lastUsedAt: grant.lastUsedAt,
 	}
@@ -196,6 +212,46 @@ export async function revokeAccountConnectedApp({
 		db: auditDatabaseFromEnv(env),
 		category: 'oauth',
 		action: 'package_app_grant_revoke',
+		result: 'success',
+		email: user.email,
+		ip: getRequestIp(request) ?? undefined,
+		path: new URL(request.url).pathname,
+		clientId: appKey,
+	})
+	return operationResult({ ok: true as const })
+}
+
+export async function revokeAccountConnectedAppScope({
+	request,
+	env,
+	user,
+	appKey,
+	scope,
+}: MutationContext & { appKey: string; scope: string }) {
+	const parsed = parseAppKey(appKey)
+	if (!parsed || !isOptionalPackageAppScope(scope)) {
+		return operationResult(
+			{ ok: false, error: 'Connected app scope not found.' },
+			404,
+		)
+	}
+	const revoked = await revokePackageAppOauthGrantScope({
+		db: env.APP_DB,
+		personId: user.mcpUser.userId,
+		orgUsername: parsed.orgUsername,
+		kodyId: parsed.kodyId,
+		scope,
+	})
+	if (!revoked) {
+		return operationResult(
+			{ ok: false, error: 'Connected app scope not found.' },
+			404,
+		)
+	}
+	void logAuditEvent({
+		db: auditDatabaseFromEnv(env),
+		category: 'oauth',
+		action: 'package_app_grant_scope_revoke',
 		result: 'success',
 		email: user.email,
 		ip: getRequestIp(request) ?? undefined,

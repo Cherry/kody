@@ -304,6 +304,58 @@ function validatePayload(
 	return expected
 }
 
+type StoredUploadResult = StoredBackup & {
+	objectKey: string
+	bookmark: string
+}
+
+/** True for BackupError / Workflows-wrapped messages naming export-result-expired. */
+function isExportResultExpiredError(error: unknown): boolean {
+	return errorCode(error) === 'export-result-expired'
+}
+
+/**
+ * Normalize the durable upload-step result. Current code returns
+ * `{ kind: 'stored' | 'export-result-expired', … }`. Instances that completed
+ * the upload step before that change still replay a flat StoredBackup; treat
+ * that as stored so catch-up does not abandon an object already in R2.
+ */
+export function acceptUploadStepResult(
+	uploadResult: unknown,
+):
+	| { kind: 'stored'; stored: StoredUploadResult }
+	| { kind: 'export-result-expired' }
+	| { kind: 'unexpected' } {
+	if (uploadResult === null || typeof uploadResult !== 'object') {
+		return { kind: 'unexpected' }
+	}
+	const record = uploadResult as Record<string, unknown>
+	if (record.kind === 'export-result-expired') {
+		return { kind: 'export-result-expired' }
+	}
+	if (record.kind === 'stored') {
+		const nested = record.stored
+		if (
+			nested !== null &&
+			typeof nested === 'object' &&
+			typeof (nested as StoredUploadResult).objectKey === 'string' &&
+			typeof (nested as StoredUploadResult).bookmark === 'string'
+		) {
+			return { kind: 'stored', stored: nested as StoredUploadResult }
+		}
+		return { kind: 'unexpected' }
+	}
+	// Pre-change durable replay: flat StoredBackup with objectKey + bookmark.
+	if (
+		!Object.hasOwn(record, 'kind') &&
+		typeof record.objectKey === 'string' &&
+		typeof record.bookmark === 'string'
+	) {
+		return { kind: 'stored', stored: record as unknown as StoredUploadResult }
+	}
+	return { kind: 'unexpected' }
+}
+
 export async function runBackupRuntime(
 	env: BackupEnvironment,
 	event: BackupRuntimeEvent,
@@ -338,74 +390,126 @@ export async function runBackupRuntime(
 		// signed URL window elapses between durable poll completion and the
 		// upload refresh. Catch-up `restart()` replays the successful export
 		// steps, so recovery must use new durable step names in-workflow.
+		//
+		// Critical: do not throw NonRetryableError for the recoverable expired
+		// case. Workflows treats NonRetryableError as instance-terminal, so a
+		// throw from inside `step.do` aborts before this loop can start
+		// `recover-*` steps. Return a durable step result instead; the step
+		// succeeds, and the next attempt runs under a fresh prefix.
 		const maxExportUploadAttempts = 3
-		let stored:
-			| (StoredBackup & {
-					objectKey: string
-					bookmark: string
-			  })
-			| null = null
+		type UploadStepResult =
+			| { kind: 'stored'; stored: StoredUploadResult }
+			| { kind: 'export-result-expired' }
+		let stored: StoredUploadResult | null = null
 		for (let attempt = 1; attempt <= maxExportUploadAttempts; attempt += 1) {
 			const stepNamePrefix = attempt === 1 ? '' : `recover-${String(attempt)}-`
-			try {
-				const exported = await runDurableExport(sourceEnv, step, {
-					api: options.api,
-					stepNamePrefix,
-				})
-				stored = await step.do(
-					`${stepNamePrefix}stream-export-to-immutable-r2`,
-					{
-						retries: { limit: 4, delay: '30 seconds', backoff: 'exponential' },
-						timeout: '15 minutes',
-					},
-					async () => {
-						// Refresh only re-polls the durable export bookmark for a
-						// fresh signed URL. It never starts a new export here.
-						const refreshed = await refreshCompletedD1Export(
-							sourceEnv,
-							exported.bookmark,
-							options.api,
-						)
+			const exported = await runDurableExport(sourceEnv, step, {
+				api: options.api,
+				stepNamePrefix,
+			})
+			const uploadResult = await step.do(
+				`${stepNamePrefix}stream-export-to-immutable-r2`,
+				{
+					retries: { limit: 4, delay: '30 seconds', backoff: 'exponential' },
+					timeout: '15 minutes',
+				},
+				async (): Promise<UploadStepResult> => {
+					try {
+						// Prefer a refreshed signed URL when the export session is
+						// still alive. Fast-completing DBs often drop that session
+						// across the Workflow step boundary before this callback
+						// runs; the poll-step signed URL remains valid (~1h), so
+						// fall back to it instead of treating the night as expired.
+						let bookmark = exported.bookmark
+						let signedUrl = exported.signedUrl
+						let usedPollStepSignedUrl = false
+						try {
+							const refreshed = await refreshCompletedD1Export(
+								sourceEnv,
+								exported.bookmark,
+								options.api,
+							)
+							bookmark = refreshed.bookmark
+							signedUrl = refreshed.signedUrl
+						} catch (error) {
+							if (!isExportResultExpiredError(error)) throw error
+							usedPollStepSignedUrl = true
+							safeLog({
+								event: 'backup-export-signed-url-fallback',
+								status: 'stale-success',
+								day: checkedPayload.day,
+								instanceId: event.instanceId,
+								databaseId: source.id,
+								databaseName: source.name,
+								attempt,
+								errorCode: 'export-result-expired',
+							})
+						}
 						const refreshedObjectKey = objectKeyForPayload(
 							checkedPayload,
-							refreshed.bookmark,
+							bookmark,
 						)
-						const uploaded = await storeSignedDownload(
-							env.BACKUP_BUCKET,
-							refreshedObjectKey,
-							refreshed.signedUrl,
-							options.downloadFetcher,
-						)
-						return {
-							...uploaded,
-							objectKey: refreshedObjectKey,
-							bookmark: refreshed.bookmark,
+						try {
+							const uploaded = await storeSignedDownload(
+								env.BACKUP_BUCKET,
+								refreshedObjectKey,
+								signedUrl,
+								options.downloadFetcher,
+							)
+							return {
+								kind: 'stored',
+								stored: {
+									...uploaded,
+									objectKey: refreshedObjectKey,
+									bookmark,
+								},
+							}
+						} catch (error) {
+							// Poll-step URL was already stale (403); force a fresh
+							// export under recover-N-* step names.
+							if (
+								usedPollStepSignedUrl &&
+								errorCode(error) === 'download-http-error'
+							) {
+								return { kind: 'export-result-expired' }
+							}
+							throw error
 						}
-					},
-				)
+					} catch (error) {
+						// Catch before the step boundary wraps BackupError as
+						// NonRetryableError (which fails the instance).
+						if (isExportResultExpiredError(error)) {
+							return { kind: 'export-result-expired' }
+						}
+						throw error
+					}
+				},
+			)
+			const accepted = acceptUploadStepResult(uploadResult)
+			if (accepted.kind === 'stored') {
+				stored = accepted.stored
 				break
-			} catch (error) {
-				// Step boundary wraps non-retryable BackupError as
-				// NonRetryableError; match via errorCode() message parse.
-				const code = errorCode(error)
-				if (
-					code !== 'export-result-expired' ||
-					attempt >= maxExportUploadAttempts
-				) {
-					throw error
-				}
-				safeLog({
-					event: 'backup-export-result-expired-recover',
-					status: 'stale-success',
-					day: checkedPayload.day,
-					instanceId: event.instanceId,
-					databaseId: source.id,
-					databaseName: source.name,
-					attempt,
-					maxAttempts: maxExportUploadAttempts,
-					errorCode: code,
-				})
 			}
+			if (accepted.kind === 'unexpected') {
+				throw new BackupError(
+					'unexpected-upload-step-result',
+					'D1 upload step returned an unrecognized durable result',
+				)
+			}
+			if (attempt >= maxExportUploadAttempts) {
+				break
+			}
+			safeLog({
+				event: 'backup-export-result-expired-recover',
+				status: 'stale-success',
+				day: checkedPayload.day,
+				instanceId: event.instanceId,
+				databaseId: source.id,
+				databaseName: source.name,
+				attempt,
+				maxAttempts: maxExportUploadAttempts,
+				errorCode: 'export-result-expired',
+			})
 		}
 		if (!stored) {
 			throw new BackupError(

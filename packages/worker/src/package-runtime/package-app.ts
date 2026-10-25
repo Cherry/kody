@@ -125,6 +125,9 @@ import {
 	listPackageAppOrigins,
 } from '#worker/app-base-url.ts'
 import { createPackageAppSetCookieScrubHostSource } from '#worker/package-runtime/package-app-set-cookie.ts'
+import { packageAppCookiePrefix } from '#worker/package-runtime/package-app-cookie-prefix.ts'
+import { checkPackageAppRateLimit } from '#worker/package-runtime/package-app-rate-limit.ts'
+import { packageAppSpendGet } from '#worker/package-runtime/package-app-spend.ts'
 import { resolvePublicPackageAppLocation } from '#worker/package-app-public-url.ts'
 import { getPackageNameLeaf } from '#worker/package-registry/package-name.ts'
 import {
@@ -204,6 +207,7 @@ function createPackageAppWorkerSource(input: {
 	 * Domain attributes that would cover the shared apex or another tenant.
 	 */
 	packageAppApexHostnames: Array<string>
+	packageAppCookiePrefix: string
 }) {
 	const mcpServerNamesExpr = input.preloadMcpServerNames
 		? 'await runtimeBridge.listMcpServerNames().catch(() => [])'
@@ -308,9 +312,30 @@ function __kodyReadIdentityOnlyVisitor(request) {
 			email: '',
 			display_name: parsed.username,
 			org: __kodyObjectFreezeCaptured({ slug: __kodyIdentityOnlyOrgSlug }),
+			scopes: Array.isArray(parsed.scopes)
+				? parsed.scopes.filter((scope) => typeof scope === 'string')
+				: [],
 		});
 	} catch {
 		return null;
+	}
+}
+function hasScope(request, scope) {
+	if (typeof scope !== 'string') return false;
+	try {
+		const raw = request?.headers?.get(
+			${JSON.stringify(packageAppVisitorHeaderName)},
+		);
+		if (!raw) return false;
+		const visitor = __kodyJsonParseCaptured(raw);
+		return (
+			typeof visitor?.userId === 'string' &&
+			visitor.userId.length > 0 &&
+			Array.isArray(visitor.scopes) &&
+			visitor.scopes.includes(scope)
+		);
+	} catch {
+		return false;
 	}
 }
 function __kodyIdentityOnlyAnswer(identity, name) {
@@ -321,6 +346,7 @@ function __kodyIdentityOnlyAnswer(identity, name) {
 		email: identity.email,
 		display_name: identity.display_name,
 		org: { slug: identity.org.slug },
+		scopes: identity.scopes,
 	};
 }
 let __kodyCapturedRuntimeBridge = null;
@@ -594,6 +620,12 @@ function createKodyProxy(runtimeBridge, mcpServerNamesOrLoader, identity = null)
 				throw new Error(
 					\`MCP server tool "\${property}" is not available as a flat kody function. Use kody.mcp[serverName].toolName(input) instead.\`,
 				);
+			}
+			if (property === 'appRateLimit') {
+				return async (args = {}) => await runtimeBridge.appRateLimit(args);
+			}
+			if (property === 'appSpendGet') {
+				return async () => await runtimeBridge.appSpendGet();
 			}
 			return async (args = {}) => {
 				const visitTicket = __kodyCurrentVisitTicket();
@@ -927,6 +959,9 @@ function createRuntime(runtimeBridge, packageContext, mcpServerNamesOrLoader, id
 	const credentialRuntime = createCredentialRuntime(runtimeBridge);
 	return {
 		kody: createKodyProxy(runtimeBridge, mcpServerNamesOrLoader, identity),
+		hasScope,
+		hasVisitorCredential: (request, key) =>
+			typeof key === 'string' && hasScope(request, \`need:\${key}\`),
 		storage: undefined,
 		__kodyPackageSecrets: (secretsPackageId) =>
 			createPackageSecretsProxy(runtimeBridge, secretsPackageId),
@@ -1001,6 +1036,7 @@ ${createNullPackagesInvokeRewriteHostSource({
 })}
 ${createPackageAppSetCookieScrubHostSource({
 	packageAppApexHostnames: input.packageAppApexHostnames,
+	cookiePrefix: input.packageAppCookiePrefix,
 })}
 
 function createConsoleLogCapture() {
@@ -1227,6 +1263,16 @@ export class ${packageAppEntrypointName} extends WorkerEntrypoint {
 							hostname: requestUrl.hostname,
 							pathname: requestUrl.pathname,
 							stripped: scrubbedCookies.stripped,
+					}),
+				);
+			}
+			if (scrubbedCookies.dropped.length > 0) {
+				console.warn(
+					'package-app-set-cookie-name-dropped ' +
+						JSON.stringify({
+							hostname: requestUrl.hostname,
+							pathname: requestUrl.pathname,
+							dropped: scrubbedCookies.dropped,
 						}),
 				);
 			}
@@ -1645,11 +1691,17 @@ export class PackageAppRuntimeBridge extends WorkerEntrypoint<
 		return visit?.credentialClientBinding ?? ''
 	}
 
-	private getStorageRunner(storageId: string) {
+	private getStorageRunner(
+		storageId: string,
+		packageAppVisitorUserId?: string,
+	) {
 		return storageRunnerRpc({
 			env: this.env,
 			userId: this.ctx.props.userId,
 			storageId,
+			...(packageAppVisitorUserId !== undefined
+				? { packageAppVisitorUserId }
+				: {}),
 		})
 	}
 
@@ -1900,6 +1952,7 @@ export class PackageAppRuntimeBridge extends WorkerEntrypoint<
 					packageId,
 					String(input.name ?? ''),
 					input.args,
+					visitTicket,
 				)
 			case 'credentialClient':
 				return await this.credentialClientCallAs(
@@ -2181,6 +2234,7 @@ export class PackageAppRuntimeBridge extends WorkerEntrypoint<
 		query: string
 		params?: Array<unknown>
 		writable: boolean
+		packageAppVisitorUserId?: string
 	}) {
 		// package app bridges always mark packageStorage SQL writable, so skip
 		// the all-bucket fan-out for pure SELECT/EXPLAIN/PRAGMA statements.
@@ -2193,7 +2247,10 @@ export class PackageAppRuntimeBridge extends WorkerEntrypoint<
 				}),
 			})
 		}
-		return await this.getStorageRunner(input.storageId).sqlQuery({
+		return await this.getStorageRunner(
+			input.storageId,
+			input.packageAppVisitorUserId,
+		).sqlQuery({
 			query: input.query,
 			params: input.params,
 			writable: input.writable,
@@ -2204,10 +2261,12 @@ export class PackageAppRuntimeBridge extends WorkerEntrypoint<
 		storageId: string
 		key: string
 		value: unknown
+		packageAppVisitorUserId?: string
 	}) {
-		const existing = await this.getStorageRunner(input.storageId).getValue({
-			key: input.key,
-		})
+		const existing = await this.getStorageRunner(
+			input.storageId,
+			input.packageAppVisitorUserId,
+		).getValue({ key: input.key })
 		await this.assertStorageWriteAllowed({
 			storageId: input.storageId,
 			requested: estimateEntitlementStorageEntryByteDelta({
@@ -2266,6 +2325,28 @@ export class PackageAppRuntimeBridge extends WorkerEntrypoint<
 		return await this.getStorageRunner(storageId).clearStorage()
 	}
 
+	async appRateLimit(input: {
+		key?: unknown
+		limit?: unknown
+		windowSeconds?: unknown
+	}) {
+		return await checkPackageAppRateLimit({
+			db: this.env.APP_DB,
+			packageId: this.ctx.props.packageId,
+			key: input?.key,
+			limit: input?.limit,
+			windowSeconds: input?.windowSeconds,
+		})
+	}
+
+	async appSpendGet() {
+		return await packageAppSpendGet({
+			db: this.env.APP_DB,
+			orgId: this.ctx.props.userId,
+			packageId: this.ctx.props.packageId,
+		})
+	}
+
 	async packageStorageGet(input: { packageId: string; key: string }) {
 		return await this.packageStorageGetAs(null, input)
 	}
@@ -2313,7 +2394,10 @@ export class PackageAppRuntimeBridge extends WorkerEntrypoint<
 		boundPackageId: string,
 		method: string,
 		args: unknown,
+		visitTicket?: string | null,
 	) {
+		const packageAppVisitorUserId =
+			(await this.visitorFor(visitTicket))?.userId ?? ''
 		const payload = (
 			args !== null && typeof args === 'object' && !Array.isArray(args)
 				? args
@@ -2333,7 +2417,9 @@ export class PackageAppRuntimeBridge extends WorkerEntrypoint<
 			prefix?: string | null
 			pageSize?: number
 			startAfter?: string | null
+			packageAppVisitorUserId?: string
 		}
+		input.packageAppVisitorUserId = packageAppVisitorUserId
 		switch (method) {
 			case 'packageStorageGet':
 				return await this.packageStorageGetAs(boundPackageId, input)
@@ -2354,7 +2440,11 @@ export class PackageAppRuntimeBridge extends WorkerEntrypoint<
 
 	private async packageStorageGetAs(
 		boundPackageId: string | null,
-		input: { packageId: string; key: string },
+		input: {
+			packageId: string
+			key: string
+			packageAppVisitorUserId?: string
+		},
 	) {
 		const packageId = this.resolvePackageStorageOwner(
 			input.packageId,
@@ -2364,6 +2454,7 @@ export class PackageAppRuntimeBridge extends WorkerEntrypoint<
 		// namespace lock on raw storage* (assertAppOwnedStorageId).
 		return await this.getStorageRunner(
 			buildPackageStorageId(packageId),
+			input.packageAppVisitorUserId,
 		).getValue({
 			key: input.key,
 		})
@@ -2376,6 +2467,7 @@ export class PackageAppRuntimeBridge extends WorkerEntrypoint<
 			prefix?: string | null
 			pageSize?: number
 			startAfter?: string | null
+			packageAppVisitorUserId?: string
 		},
 	) {
 		const packageId = this.resolvePackageStorageOwner(
@@ -2384,6 +2476,7 @@ export class PackageAppRuntimeBridge extends WorkerEntrypoint<
 		)
 		return await this.getStorageRunner(
 			buildPackageStorageId(packageId),
+			input.packageAppVisitorUserId,
 		).listValues({
 			prefix: input.prefix,
 			pageSize: input.pageSize,
@@ -2398,6 +2491,7 @@ export class PackageAppRuntimeBridge extends WorkerEntrypoint<
 			query: string
 			params?: Array<unknown>
 			writable?: boolean
+			packageAppVisitorUserId?: string
 		},
 	) {
 		const packageId = this.resolvePackageStorageOwner(
@@ -2409,6 +2503,7 @@ export class PackageAppRuntimeBridge extends WorkerEntrypoint<
 			query: input.query,
 			params: input.params,
 			writable: input.writable ?? false,
+			packageAppVisitorUserId: input.packageAppVisitorUserId,
 		})
 	}
 
@@ -2418,6 +2513,7 @@ export class PackageAppRuntimeBridge extends WorkerEntrypoint<
 			packageId: string
 			key: string
 			value: unknown
+			packageAppVisitorUserId?: string
 		},
 	) {
 		const packageId = this.resolvePackageStorageOwner(
@@ -2428,6 +2524,7 @@ export class PackageAppRuntimeBridge extends WorkerEntrypoint<
 			storageId: buildPackageStorageId(packageId),
 			key: input.key,
 			value: input.value,
+			packageAppVisitorUserId: input.packageAppVisitorUserId,
 		})
 	}
 
@@ -3131,7 +3228,7 @@ function packageAppPublicBasePath(input: {
 async function buildPackageAppPublicContext(input: {
 	env: Env
 	baseUrl: string
-	savedPackage: { kodyId: string; name: string }
+	savedPackage: { id: string; kodyId: string; name: string }
 	runtime: {
 		servingUsername?: string
 		hostedOrigin?: string
@@ -3141,6 +3238,7 @@ async function buildPackageAppPublicContext(input: {
 	const username =
 		input.runtime.servingUsername ??
 		getUsernameFromPackageName(input.savedPackage.name)
+	const cookiePrefix = await packageAppCookiePrefix(input.savedPackage.id)
 	// Public URLs use the name leaf (Kent: slug = leaf). Keep kodyId on the
 	// package context as identity; only the path segment switches to the leaf.
 	const urlSlug = getPackageNameLeaf(input.savedPackage.name)
@@ -3157,6 +3255,7 @@ async function buildPackageAppPublicContext(input: {
 		return {
 			appBasePath,
 			hostedUrl: `${input.runtime.hostedOrigin.replace(/\/+$/, '')}${appBasePath}`,
+			cookiePrefix,
 		}
 	}
 	// Background/synthetic callers get the canonical hosted URL: a verified
@@ -3167,7 +3266,7 @@ async function buildPackageAppPublicContext(input: {
 		username,
 		kodyId: urlSlug,
 	})
-	if (canonical) return canonical
+	if (canonical) return { ...canonical, cookiePrefix }
 	const hostedUrl = resolveHostedPackageAppUrl({
 		packageAppBaseUrl: getPackageAppBaseUrl({ env: input.env }),
 		appBaseUrl: input.baseUrl,
@@ -3177,6 +3276,7 @@ async function buildPackageAppPublicContext(input: {
 	return {
 		appBasePath: new URL(hostedUrl).pathname,
 		hostedUrl,
+		cookiePrefix,
 	}
 }
 
@@ -3513,6 +3613,7 @@ async function buildPackageAppWorkerOptionsUncached(
 			packageAppApexHostnames: listPackageAppOrigins({
 				env: input.env,
 			}).map((origin) => origin.hostname),
+			packageAppCookiePrefix: publicContext.cookiePrefix,
 		}),
 	}
 	// The cached template is identity-free: no visitor, request context, or
@@ -3701,6 +3802,18 @@ export async function buildPackageAppWorker(input: {
 			input.runtime.callerContext,
 			input.runtime.servingUsername,
 		)
+		const visitorGrant =
+			visitor && orgSlug
+				? await findLivePackageAppOauthGrant({
+						db: input.env.APP_DB,
+						personId: visitor.userId,
+						orgUsername: orgSlug.toLowerCase(),
+						kodyId: input.savedPackage.kodyId,
+					}).catch((error: unknown) => {
+						console.warn('package-app-visitor-grant-lookup-failed', error)
+						return null
+					})
+				: null
 		const requestVisit = await createPackageAppRequestVisit({
 			env: input.env,
 			visitor,
@@ -3720,6 +3833,8 @@ export async function buildPackageAppWorker(input: {
 				publishedCommit: input.savedPackage.publishedCommit,
 			},
 			request: input.runtime.callerContext.request ?? null,
+			grantId: visitorGrant?.id ?? null,
+			scopes: visitorGrant?.scopes ?? ['profile'],
 		})
 		const cacheKey = createPackageAppWorkerCacheKey({
 			userId: input.userId,
@@ -3779,6 +3894,8 @@ export async function buildPackageAppWorker(input: {
 				workerId: build.workerId,
 				surface,
 				packageId: input.savedPackage.id,
+				packageAppVisitorUserId:
+					visitor?.userId ?? input.runtime.callerContext.user?.userId ?? '',
 				connectionKey: usageConnectionKey(input.runtime.callerContext.request),
 				waitUntil: input.waitUntil,
 			})
@@ -3800,6 +3917,7 @@ function schedulePackageAppUniqueWorkerDay(input: {
 	workerId: string
 	surface: 'app_fetch' | 'app_realtime'
 	packageId: string
+	packageAppVisitorUserId: string
 	connectionKey: string
 	waitUntil?: (promise: Promise<unknown>) => void
 }) {
@@ -3809,6 +3927,7 @@ function schedulePackageAppUniqueWorkerDay(input: {
 		workerId: input.workerId,
 		surface: input.surface,
 		packageId: input.packageId,
+		packageAppVisitorUserId: input.packageAppVisitorUserId,
 		connectionKey: input.connectionKey,
 	}).catch((error: unknown) => {
 		console.warn('package-app-dynamic-worker-day-record-failed', error)

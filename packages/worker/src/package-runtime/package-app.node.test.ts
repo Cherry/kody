@@ -314,6 +314,45 @@ test('package app kody.mcp loads server names lazily on first mcp touch', async 
 	expect(loadCount).toBe(1)
 })
 
+test('package app owned limit and spend helpers use the runtime bridge', async () => {
+	const runtimeBridge = {
+		appRateLimit: vi.fn(async () => ({
+			allowed: false,
+			retryAfterSeconds: 12,
+		})),
+		appSpendGet: vi.fn(async () => ({
+			month: '2026-05',
+			creditsMicroUsd: 2000,
+			days: [],
+		})),
+		callCapability: vi.fn(async () => ({ unexpected: true })),
+	}
+	const proxy = createKodyProxyForTest(runtimeBridge) as Record<
+		string,
+		(args?: unknown) => Promise<unknown>
+	>
+
+	await expect(
+		proxy.appRateLimit!({
+			key: 'task',
+			limit: 1,
+			windowSeconds: 60,
+		}),
+	).resolves.toEqual({ allowed: false, retryAfterSeconds: 12 })
+	await expect(proxy.appSpendGet!({})).resolves.toEqual({
+		month: '2026-05',
+		creditsMicroUsd: 2000,
+		days: [],
+	})
+	expect(runtimeBridge.appRateLimit).toHaveBeenCalledWith({
+		key: 'task',
+		limit: 1,
+		windowSeconds: 60,
+	})
+	expect(runtimeBridge.appSpendGet).toHaveBeenCalledWith()
+	expect(runtimeBridge.callCapability).not.toHaveBeenCalled()
+})
+
 test('package app workflows proxy validates input and forwards to the runtime bridge', async () => {
 	const workflows = createWorkflowsProxyForTest({
 		workflowCreate: async (input: unknown) => input,
@@ -829,6 +868,7 @@ test('buildPackageAppWorker serves an artifactName-null artifact hit and reuses 
 	expect(packageAppHostSource).toContain(
 		'package-app-set-cookie-domain-stripped',
 	)
+	expect(packageAppHostSource).toContain('package-app-set-cookie-name-dropped')
 	expect(packageAppHostSource).not.toContain('getSecretAuthority')
 	expect(packageAppHostSource).not.toMatch(
 		/headers\.set\([^)]*x-kody-secret-authority/,
@@ -1079,6 +1119,7 @@ test('package app worker exposes its public mount and records fetch query and re
 
 	expect(loaderWorkerOptions(loader)?.env['__kodyPackageContext']).toEqual({
 		packageId: 'package-public-context',
+		cookiePrefix: '__kapp_1358a8c63e1c_',
 		kodyId: 'renamed-app',
 		sourceId: 'source-1',
 		publishedCommit: 'commit-1',
@@ -1558,6 +1599,7 @@ test('package app runtime bridge enforces packageStorage grants and raw storage 
 	).resolves.toEqual({ value: 'granted-value' })
 	expect(getStorageRunner).toHaveBeenCalledWith(
 		buildPackageStorageId('package-1'),
+		undefined,
 	)
 	expect(getValue).toHaveBeenCalledWith({ key: 'count' })
 
