@@ -59,6 +59,20 @@ export type CapabilityApiOperation = ApiOperationBase & {
 	 * XOR (e.g. `repo_id` | `name`).
 	 */
 	aliasPaths?: ReadonlyArray<string>
+	/**
+	 * Deprecated /v1 route kept for a deprecation window: invokes `capability`
+	 * with `fixedInputs` merged over the caller's params, strips those keys from
+	 * the output, and sends Deprecation/Sunset headers. See docs/guides/api-versioning.md.
+	 */
+	deprecatedForward?: {
+		capability: string
+		fixedInputs: Readonly<Record<string, string>>
+		permission?: SurfacePermission
+		/** YYYY-MM-DD (UTC) */
+		deprecatedAt: string
+		/** YYYY-MM-DD (UTC) */
+		sunset: string
+	}
 }
 
 export const nativeApiOperationIds = [
@@ -96,7 +110,10 @@ type CapabilityRoute = [
 	method: ApiOperationMethod,
 	path: string,
 	capabilityName: string,
-	options?: Pick<CapabilityApiOperation, 'omitInputs' | 'aliasPaths'>,
+	options?: Pick<
+		CapabilityApiOperation,
+		'omitInputs' | 'aliasPaths' | 'deprecatedForward'
+	>,
 ]
 
 function capabilityRoutes(
@@ -111,6 +128,27 @@ function capabilityRoutes(
 		tag,
 		...options,
 	}))
+}
+
+function resourceLockForward(
+	kind: 'secret' | 'secret_provider' | 'integration' | 'mcp_server',
+): NonNullable<CapabilityApiOperation['deprecatedForward']> {
+	return {
+		capability: 'resourceLock',
+		fixedInputs: { kind },
+		permission:
+			kind === 'secret' || kind === 'secret_provider'
+				? 'secret:use'
+				: 'integration:use',
+		deprecatedAt: '2026-10-24',
+		sunset: '2027-01-22',
+	}
+}
+
+export function capabilityNameForOperation(
+	operation: CapabilityApiOperation,
+): string {
+	return operation.deprecatedForward?.capability ?? operation.operationId
 }
 
 function nativeRoute(
@@ -214,7 +252,13 @@ export const apiOperations: ReadonlyArray<ApiOperation> = [
 	...capabilityRoutes('secrets', [
 		['GET', '/v1/secrets', 'secretList'],
 		['POST', '/v1/secrets/batch', 'secretSetMany'],
-		['POST', '/v1/secrets/lock', 'secretLock'],
+		[
+			'POST',
+			'/v1/secrets/lock',
+			'secretLock',
+			{ deprecatedForward: resourceLockForward('secret') },
+		],
+		['POST', '/v1/resource-locks', 'resourceLock'],
 		['POST', '/v1/secrets/jwt', 'secretJwtSign'],
 		['PUT', '/v1/secrets/{scope}/{name}', 'secretSet'],
 		['POST', '/v1/secrets/{scope}/{name}/disconnect', 'secretDisconnect'],
@@ -237,7 +281,12 @@ export const apiOperations: ReadonlyArray<ApiOperation> = [
 		['GET', '/v1/secret-providers', 'secretProviderList'],
 		['PUT', '/v1/secret-providers/{provider}', 'secretProviderBind'],
 		['DELETE', '/v1/secret-providers/{provider}', 'secretProviderUnbind'],
-		['POST', '/v1/secret-providers/{provider}/lock', 'secretProviderLock'],
+		[
+			'POST',
+			'/v1/secret-providers/{provider}/lock',
+			'secretProviderLock',
+			{ deprecatedForward: resourceLockForward('secret_provider') },
+		],
 	]),
 	...capabilityRoutes('packages', [
 		['GET', '/v1/packages', 'packageList'],
@@ -377,7 +426,12 @@ export const apiOperations: ReadonlyArray<ApiOperation> = [
 		['GET', '/v1/integrations/{name}', 'integrationGet'],
 		['PUT', '/v1/integrations/{name}', 'integrationSave'],
 		['DELETE', '/v1/integrations/{name}', 'integrationDelete'],
-		['POST', '/v1/integrations/{name}/lock', 'integrationLock'],
+		[
+			'POST',
+			'/v1/integrations/{name}/lock',
+			'integrationLock',
+			{ deprecatedForward: resourceLockForward('integration') },
+		],
 		['POST', '/v1/integrations/{name}/refresh', 'integrationTokenRefresh'],
 		['GET', '/v1/oauth-apps', 'integrationOauthAppList'],
 		['DELETE', '/v1/oauth-apps/{slug}', 'integrationOauthAppDelete'],
@@ -395,7 +449,12 @@ export const apiOperations: ReadonlyArray<ApiOperation> = [
 		['PUT', '/v1/mcp-servers/{server}/enabled', 'mcpServerSetEnabled'],
 		['POST', '/v1/mcp-servers/{server}/reconnect', 'mcpServerReconnect'],
 		['POST', '/v1/mcp-servers/{server}/refresh', 'mcpServerRefresh'],
-		['POST', '/v1/mcp-servers/{server}/lock', 'mcpServerLock'],
+		[
+			'POST',
+			'/v1/mcp-servers/{server}/lock',
+			'mcpServerLock',
+			{ deprecatedForward: resourceLockForward('mcp_server') },
+		],
 	]),
 	...capabilityRoutes('runs', [
 		['GET', '/v1/runs', 'runList'],

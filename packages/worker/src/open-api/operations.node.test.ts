@@ -10,6 +10,7 @@ import { buildOpenApiDocument, resolveApiOperation } from './document.ts'
 import {
 	apiOperationUsesQueryInputs,
 	apiOperations,
+	capabilityNameForOperation,
 	getApiOperationPathParams,
 	listApiOperationPaths,
 	matchApiRoute,
@@ -85,7 +86,8 @@ test('every capability operation is a public, non-admin capability with matching
 	for (const operation of apiOperations) {
 		const resolved = resolveApiOperation(operation, registry)
 		if (operation.kind === 'capability') {
-			const capability = registry.capabilityMap[operation.operationId]!
+			const capability =
+				registry.capabilityMap[capabilityNameForOperation(operation)]!
 			if (excludedDomains.has(capability.domain)) {
 				problems.push(`${operation.operationId}: excluded domain`)
 			}
@@ -370,9 +372,61 @@ test('the OpenAPI document covers every operation with resolvable refs', async (
 	expect(
 		Object.keys((secretBody?.['properties'] as object) ?? {}),
 	).not.toContain('name')
+	const resourceLock = document.paths['/v1/resource-locks']?.['post']
+	expect(resourceLock?.['x-kody-permission']).toBe('none')
+	const resourceLockSchema =
+		resourceLock?.requestBody?.content['application/json']?.schema
 	expect(
-		document.paths['/v1/secrets/lock']?.['post']?.['x-kody-permission'],
-	).toBe('secret:use')
+		Array.isArray(resourceLockSchema?.['oneOf']) ||
+			Array.isArray(resourceLockSchema?.['anyOf']),
+	).toBe(true)
+	expect(resourceLock?.deprecated).toBeUndefined()
+	const deprecatedLockRoutes = [
+		{
+			operationId: 'secretLock',
+			path: '/v1/secrets/lock',
+			pathParams: [],
+			permission: 'secret:use',
+		},
+		{
+			operationId: 'secretProviderLock',
+			path: '/v1/secret-providers/{provider}/lock',
+			pathParams: ['provider'],
+			permission: 'secret:use',
+		},
+		{
+			operationId: 'integrationLock',
+			path: '/v1/integrations/{name}/lock',
+			pathParams: ['name'],
+			permission: 'integration:use',
+		},
+		{
+			operationId: 'mcpServerLock',
+			path: '/v1/mcp-servers/{server}/lock',
+			pathParams: ['server'],
+			permission: 'integration:use',
+		},
+	]
+	for (const deprecatedRoute of deprecatedLockRoutes) {
+		const operation = document.paths[deprecatedRoute.path]?.['post']
+		expect(operation).toMatchObject({
+			operationId: deprecatedRoute.operationId,
+			deprecated: true,
+		})
+		expect(operation?.['x-kody-permission']).toBe(deprecatedRoute.permission)
+		expect(operation?.description).toContain('resourceLock')
+		const bodySchema =
+			operation?.requestBody?.content['application/json']?.schema
+		const bodyProperties = isRecord(bodySchema?.['properties'])
+			? bodySchema['properties']
+			: {}
+		expect(bodyProperties).not.toHaveProperty('kind')
+		expect(
+			(operation?.parameters ?? [])
+				.filter((parameter) => parameter.in === 'path')
+				.map((parameter) => parameter.name),
+		).toEqual(deprecatedRoute.pathParams)
+	}
 	expect(document.paths['/v1/search']?.['get']?.['x-kody-permission']).toBe(
 		'search:read',
 	)

@@ -859,6 +859,12 @@ export const bakedOpenApiRoutes = [
 		pathParamNames: ['repo_id'],
 	},
 	{
+		operationId: 'resourceLock',
+		method: 'POST',
+		pathTemplate: '/v1/resource-locks',
+		pathParamNames: [],
+	},
+	{
 		operationId: 'runGet',
 		method: 'GET',
 		pathTemplate: '/v1/runs/{run_id}',
