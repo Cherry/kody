@@ -1550,34 +1550,137 @@ export async function cancelActiveWorkflowRunsForUser(input: {
 	return cancelled
 }
 
+export type ListWorkflowRunsForUserFilter = {
+	/** Exact workflow run id (dynwf-… or pkgwf-…). */
+	workflowId?: string | null
+	status?: string | null
+	packageId?: string | null
+	/** Inclusive ISO lower bound on created_at. */
+	since?: string | null
+}
+
 export async function listWorkflowRunsForUser(input: {
 	env: Pick<Env, 'DYNAMIC_CALLABLE_WORKFLOWS' | 'RUN_LOG'>
 	userId: OwnerId
 	limit?: number
+	filter?: ListWorkflowRunsForUserFilter | null
 }): Promise<Array<WorkflowRunInspection>> {
 	const env = input.env as Env
 	const limit = Math.min(Math.max(input.limit ?? 25, 1), 100)
-	const listed = await listWorkflowProjections({
+	const filter = input.filter ?? null
+	const statusFilter = filter?.status?.trim() || null
+	const shared = {
 		env,
 		userId: input.userId,
-		limit,
 		bindingName: dynamicCallableWorkflowsBindingName,
+		id: filter?.workflowId ?? null,
+		packageId: filter?.packageId ?? null,
+		since: filter?.since ?? null,
+	} as const
+
+	if (!statusFilter) {
+		const listed = await listWorkflowProjections({
+			...shared,
+			limit,
+		})
+		const rows = listed.projections.map((projection) =>
+			mapWorkflowProjectionToInspection(projection, input.userId),
+		)
+		await refreshListedWorkflowRunStatuses({
+			env,
+			userId: input.userId,
+			rows,
+			forceRefresh: false,
+		})
+		return rows
+	}
+
+	// Exact SQL matches plus every active projection (page through; max plan
+	// allows more concurrent workflows than one list page). Refresh actives,
+	// then keep only the requested status so stale "running" rows that already
+	// finished are not missed and older terminal rows are not dropped behind a
+	// newest-page window of actives.
+	const [exact, activeProjections] = await Promise.all([
+		listWorkflowProjections({
+			...shared,
+			status: statusFilter,
+			limit,
+		}),
+		listAllActiveWorkflowProjections(shared),
+	])
+	const byId = new Map<string, WorkflowRunInspection>()
+	for (const projection of [...exact.projections, ...activeProjections]) {
+		if (byId.has(projection.id)) continue
+		byId.set(
+			projection.id,
+			mapWorkflowProjectionToInspection(projection, input.userId),
+		)
+	}
+	const rows = [...byId.values()]
+	await refreshListedWorkflowRunStatuses({
+		env,
+		userId: input.userId,
+		rows,
+		forceRefresh: true,
 	})
-	const rows = listed.projections.map((projection) =>
-		mapWorkflowProjectionToInspection(projection, input.userId),
-	)
+	return rows
+		.filter((row) => row.status === statusFilter)
+		.sort((left, right) => {
+			const byCreated = right.createdAt.localeCompare(left.createdAt)
+			if (byCreated !== 0) return byCreated
+			return right.id.localeCompare(left.id)
+		})
+		.slice(0, limit)
+}
+
+async function listAllActiveWorkflowProjections(shared: {
+	env: Env
+	userId: OwnerId
+	bindingName: string
+	id?: string | null
+	packageId?: string | null
+	since?: string | null
+}) {
+	const projections: Array<
+		Awaited<ReturnType<typeof listWorkflowProjections>>['projections'][number]
+	> = []
+	let cursor: string | null = null
+	do {
+		const page = await listWorkflowProjections({
+			...shared,
+			statuses: activeWorkflowStatusValues,
+			limit: runRecordMaxPageSize,
+			cursor,
+		})
+		projections.push(...page.projections)
+		cursor = page.nextCursor
+	} while (cursor)
+	return projections
+}
+
+async function refreshListedWorkflowRunStatuses(input: {
+	env: Env
+	userId: OwnerId
+	rows: Array<WorkflowRunInspection>
+	forceRefresh: boolean
+}) {
 	const now = new Date()
 	await Promise.all(
-		rows.map(async (row) => {
+		input.rows.map(async (row) => {
 			if (!row.status || !activeWorkflowStatuses.has(row.status)) return
-			const updatedAtMs = new Date(row.updatedAt).getTime()
-			if (
-				Number.isFinite(updatedAtMs) &&
-				now.getTime() - updatedAtMs < workflowStatusRefreshTtlMs
-			) {
-				return
+			if (!input.forceRefresh) {
+				const updatedAtMs = new Date(row.updatedAt).getTime()
+				if (
+					Number.isFinite(updatedAtMs) &&
+					now.getTime() - updatedAtMs < workflowStatusRefreshTtlMs
+				) {
+					return
+				}
 			}
-			const workflowBinding = resolveWorkflowEngineBinding(env, row.bindingName)
+			const workflowBinding = resolveWorkflowEngineBinding(
+				input.env,
+				row.bindingName,
+			)
 			let instance: WorkflowInstance
 			try {
 				instance = await workflowBinding.get(row.id)
@@ -1595,7 +1698,7 @@ export async function listWorkflowRunsForUser(input: {
 			}
 			const payload = payloadFromWorkflowInspection(row)
 			await projectWorkflowRun({
-				env,
+				env: input.env,
 				userId: input.userId,
 				id: row.id,
 				payload,
@@ -1606,7 +1709,6 @@ export async function listWorkflowRunsForUser(input: {
 			})
 		}),
 	)
-	return rows
 }
 
 export class DynamicCallableWorkflowBase extends WorkflowEntrypoint<
