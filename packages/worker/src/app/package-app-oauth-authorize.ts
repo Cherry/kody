@@ -18,7 +18,6 @@ import {
 import { isAllowedPackageAppOauthRedirectUri } from '#app/package-app-oauth-redirect-uris.ts'
 import {
 	parsePackageAppOauthScopes,
-	scopesIncludeEmail,
 	visitorNeedKeysOfScopes,
 	type PackageAppOauthScope,
 } from '#app/package-app-oauth-scopes.ts'
@@ -83,6 +82,7 @@ type AuthorizeQuery = {
 	codeChallengeMethod: string | null
 	scopeRaw: string | null
 	responseType: string | null
+	selectedScopesRaw?: string
 }
 
 function readAuthorizeQuery(url: URL): AuthorizeQuery {
@@ -102,36 +102,11 @@ async function shouldSkipConsent(input: {
 	personId: string
 	orgUsername: string
 	kodyId: string
+	ownerId: string
+	appId: string
+	viewer: Parameters<typeof viewerCanExecutePackageApp>[0]['viewer']
 	scopes: ReadonlyArray<PackageAppOauthScope>
-	viewer: Awaited<ReturnType<typeof readAuthenticatedAppUser>>
 }): Promise<boolean> {
-	if (!input.viewer) return false
-	try {
-		const org = await resolvePackageAppOrgOwnerByHandle({
-			env: input.env,
-			handle: input.orgUsername,
-		})
-		if (!org) return false
-
-		const lookup = await resolveSavedPackageForPackageAppSlug({
-			db: input.env.APP_DB,
-			userId: org.userId,
-			slug: input.kodyId,
-		})
-		const canExecute = await viewerCanExecutePackageApp({
-			env: input.env,
-			viewer: input.viewer.mcpUser,
-			ownerId: org.userId,
-			appId: lookup?.savedPackage.id ?? null,
-		})
-		const needsEmail = scopesIncludeEmail(input.scopes)
-		// A visitor need shares the visitor's own data: always asked once.
-		const needsVisitorData = visitorNeedKeysOfScopes(input.scopes).length > 0
-		if (canExecute && !needsEmail && !needsVisitorData) return true
-	} catch {
-		// Fall through to grant lookup / consent when access tables are incomplete.
-	}
-
 	const grant = await findLivePackageAppOauthGrant({
 		db: input.env.APP_DB,
 		personId: input.personId,
@@ -139,7 +114,18 @@ async function shouldSkipConsent(input: {
 		kodyId: input.kodyId,
 	})
 	if (grant && grantCoversScopes(grant, input.scopes)) return true
-	return false
+	if (
+		input.scopes.includes('email') ||
+		visitorNeedKeysOfScopes(input.scopes).length > 0
+	) {
+		return false
+	}
+	return await viewerCanExecutePackageApp({
+		env: input.env,
+		viewer: input.viewer,
+		ownerId: input.ownerId,
+		appId: input.appId,
+	})
 }
 
 async function issueCodeAndRedirect(input: {
@@ -247,6 +233,7 @@ async function loadConsentPackageMeta(input: {
 async function parseAndValidateAuthorizeRequest(input: {
 	env: Env
 	query: AuthorizeQuery
+	requestUrl: string | URL
 }) {
 	const parsed = parsePackageAppOauthClientId(input.query.clientIdRaw)
 	if (!parsed) {
@@ -295,6 +282,7 @@ async function parseAndValidateAuthorizeRequest(input: {
 		env: input.env,
 		client,
 		redirectUri: input.query.redirectUri,
+		requestUrl: input.requestUrl,
 	})
 	if (!allowed) {
 		return {
@@ -377,6 +365,8 @@ async function parseAndValidateAuthorizeRequest(input: {
 	return {
 		ok: true as const,
 		client,
+		org: resolved.org,
+		savedPackage: resolved.savedPackage,
 		redirectUri: safeRedirectUri,
 		state: input.query.state,
 		codeChallenge: input.query.codeChallenge,
@@ -386,7 +376,8 @@ async function parseAndValidateAuthorizeRequest(input: {
 }
 
 function isSameOriginAuthorizePost(request: Request, env: Env) {
-	const appOrigin = new URL(getAppBaseUrl({ env })).origin
+	const appOrigin = new URL(getAppBaseUrl({ env, requestUrl: request.url }))
+		.origin
 	const origin = request.headers.get('Origin')
 	if (origin) return origin === appOrigin
 	const site = request.headers.get('Sec-Fetch-Site')
@@ -425,15 +416,23 @@ export async function handlePackageAppOauthAuthorizeRequest(
 							form.get('code_challenge_method') ?? 'S256',
 						),
 						scopeRaw: String(form.get('scope') ?? ''),
+						selectedScopesRaw: form
+							.getAll('selected_scopes')
+							.map(String)
+							.join(' '),
 						responseType: String(form.get('response_type') ?? 'code'),
 						decision: String(form.get('decision') ?? ''),
 					}
 				})()
-			: { ...readAuthorizeQuery(url), decision: '' }
+			: {
+					...readAuthorizeQuery(url),
+					decision: '',
+				}
 
 	const validated = await parseAndValidateAuthorizeRequest({
 		env,
 		query,
+		requestUrl: request.url,
 	})
 	if (!validated.ok) return validated.response
 
@@ -445,6 +444,16 @@ export async function handlePackageAppOauthAuthorizeRequest(
 	if (request.method === 'POST') {
 		if (!isSameOriginAuthorizePost(request, env)) {
 			return new Response('Cross-origin consent posts are not allowed.', {
+				status: 403,
+				headers: { 'Cache-Control': 'no-store' },
+			})
+		}
+		const chosen = parsePackageAppOauthScopes(query.selectedScopesRaw)
+		if (
+			chosen.error ||
+			!chosen.scopes.every((scope) => validated.scopes.includes(scope))
+		) {
+			return new Response('Consent request state is invalid.', {
 				status: 403,
 				headers: { 'Cache-Control': 'no-store' },
 			})
@@ -475,7 +484,7 @@ export async function handlePackageAppOauthAuthorizeRequest(
 			kodyId: validated.client.kodyId,
 			redirectUri: validated.redirectUri,
 			codeChallenge: validated.codeChallenge,
-			scopes: validated.scopes,
+			scopes: chosen.scopes,
 			state: validated.state,
 			recordGrant: true,
 		})
@@ -490,8 +499,13 @@ export async function handlePackageAppOauthAuthorizeRequest(
 		personId: user.mcpUser.userId,
 		orgUsername: validated.client.username,
 		kodyId: validated.client.kodyId,
+		ownerId: validated.org.userId,
+		appId: validated.savedPackage.id,
+		viewer: {
+			userId: user.mcpUser.userId,
+			username: user.username,
+		},
 		scopes: validated.scopes,
-		viewer: user,
 	})
 	if (skip && options.allowConsentSkip !== false) {
 		return await issueCodeAndRedirect({
@@ -529,6 +543,31 @@ export async function handlePackageAppOauthAuthorizeRequest(
 		scope: validated.scopes.join(' '),
 	}
 	if (validated.state) hiddenFields.state = validated.state
+	const grant = await findLivePackageAppOauthGrant({
+		db: env.APP_DB,
+		personId: user.mcpUser.userId,
+		orgUsername: validated.client.username,
+		kodyId: validated.client.kodyId,
+	})
+	const alreadyAllowed = new Set(grant?.scopes ?? [])
+	const requiredScopes: Array<PackageAppOauthScope> = ['profile']
+	const alreadyAllowedScopes = [...alreadyAllowed].filter(
+		(scope) =>
+			validated.scopes.includes(scope) && !requiredScopes.includes(scope),
+	)
+	const requiredLabels = packageAppOauthClaimLabels(requiredScopes)
+	const optionalScopes = validated.scopes
+		.filter(
+			(scope) => !requiredScopes.includes(scope) && !alreadyAllowed.has(scope),
+		)
+		.map((scope) => ({
+			scope,
+			label:
+				packageAppOauthClaimLabels(
+					[scope],
+					validated.visitorNeedDescriptions,
+				).at(-1) ?? scope,
+		}))
 
 	return {
 		consent: {
@@ -543,10 +582,18 @@ export async function handlePackageAppOauthAuthorizeRequest(
 			kodyId: validated.client.kodyId,
 			redirectUri: validated.redirectUri,
 			scopes: [...validated.scopes],
+			requiredScopes,
+			alreadyAllowedScopes,
+			requiredLabels,
 			claimLabels: packageAppOauthClaimLabels(
 				validated.scopes,
 				validated.visitorNeedDescriptions,
 			),
+			optionalScopes,
+			alreadyAllowedLabels: packageAppOauthClaimLabels(
+				alreadyAllowedScopes,
+				validated.visitorNeedDescriptions,
+			).filter((label) => !requiredLabels.includes(label)),
 			hiddenFields,
 		},
 	}

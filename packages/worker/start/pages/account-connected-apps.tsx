@@ -6,6 +6,7 @@ import { toast } from '#client/toast.ts'
 import {
 	revokeConnectedApp,
 	revokeConnectedAppAgent,
+	revokeConnectedAppScope,
 } from '#start/server/account-mutations'
 import { groupConnectedAgents } from '#universal/connected-mcp-agents.ts'
 import {
@@ -68,6 +69,13 @@ export function AccountConnectedAppsPage({
 		onMutate: () => invalidate,
 		onSettled: (_result, _error, _input, reconcile) => reconcile?.(),
 	})
+	const scopeMutation = useMutation({
+		gcTime: 0,
+		mutationFn: (input: { appKey: string; scope: string }) =>
+			revokeConnectedAppScope({ data: input }),
+		onMutate: () => invalidate,
+		onSettled: (_result, _error, _input, reconcile) => reconcile?.(),
+	})
 	const apps = payload.apps.filter((app) => !removedApps.has(app.appKey))
 	const agentGroups = groupConnectedAgents(
 		payload.agents.filter((agent) => !removedAgents.has(agent.clientId)),
@@ -126,6 +134,21 @@ export function AccountConnectedAppsPage({
 		)
 	}
 
+	function revokeAppScope(app: AccountConnectedAppView, scope: string) {
+		const isCurrent = capture()
+		void scopeMutation.mutateAsync({ appKey: app.appKey, scope }).then(
+			() => {
+				if (isCurrent()) toast.success('That access has been revoked.')
+			},
+			(error: unknown) => {
+				if (isCurrent())
+					toast.error(
+						error instanceof Error ? error.message : 'Unable to revoke.',
+					)
+			},
+		)
+	}
+
 	return (
 		<AccountManagementShell layout="form" currentHref={currentHref}>
 			<AccountPageHeader
@@ -149,9 +172,30 @@ export function AccountConnectedAppsPage({
 										<span css={rowTitleCss}>{app.appName}</span>
 										<span css={mutedCss}>By {app.publisherName}</span>
 										<ul css={allowsCss} aria-label={`${app.appName} can`}>
-											{app.allows.map((allow) => (
-												<li key={allow}>{allow}</li>
-											))}
+											{app.allows.map((allow, index) => {
+												const scope = allow.scope
+												return (
+													<li
+														key={scope ?? `${allow.label}:${index}`}
+														css={scope ? scopeRowCss : undefined}
+													>
+														<span>{allow.label}</span>
+														{scope ? (
+															<button
+																type="button"
+																aria-label={`Revoke ${allow.label}`}
+																css={dangerButtonCss}
+																onClick={() => {
+																	if (window.confirm(`Revoke ${allow.label}?`))
+																		revokeAppScope(app, scope)
+																}}
+															>
+																Revoke
+															</button>
+														) : null}
+													</li>
+												)
+											})}
 										</ul>
 										<span css={mutedCss}>
 											Last used{' '}
@@ -353,6 +397,13 @@ const allowsCss: CSSObject = {
 	fontSize: typography.fontSize.sm,
 	display: 'grid',
 	gap: '0.15rem',
+}
+
+const scopeRowCss: CSSObject = {
+	display: 'flex',
+	alignItems: 'center',
+	justifyContent: 'space-between',
+	gap: spacing.sm,
 }
 
 const emptyCss: CSSObject = { color: colors.textMuted, margin: 0 }

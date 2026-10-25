@@ -18,18 +18,26 @@ const loaderData: PackageAppOauthConsentLoaderData = {
 	kodyId: 'demo',
 	redirectUri: 'https://acme.kody.run/_kody/auth/callback',
 	scopes: ['profile', 'email'],
+	requiredScopes: ['profile'],
+	alreadyAllowedScopes: [],
+	requiredLabels: [
+		'See your name, username, and avatar',
+		'See your access level for this app',
+	],
 	claimLabels: [
 		'See your name, username, and avatar',
 		'See your access level for this app',
 		'See your email address',
 	],
+	optionalScopes: [{ scope: 'email', label: 'See your email address' }],
+	alreadyAllowedLabels: [],
 	hiddenFields: {
 		client_id: 'acme/demo',
 		redirect_uri: 'https://acme.kody.run/_kody/auth/callback',
 		response_type: 'code',
 		code_challenge: 'abc',
 		code_challenge_method: 'S256',
-		scope: 'email',
+		scope: 'profile email',
 		state: 's1',
 	},
 }
@@ -48,6 +56,15 @@ test('package-app OAuth consent renders Kody shell fields', async () => {
 	expect(publisherText).toBe('Published by Acme Apps (@acme)')
 	expect(html).toContain('acme.kody.run')
 	expect(html).toContain('See your email address')
+	expect(html).toContain('type="checkbox"')
+	expect(html).toMatch(/name="selected_scopes"[^>]*value="email"/)
+	expect(html).toContain('form="package-app-oauth-consent-form"')
+	expect(html).toContain('id="package-app-oauth-consent-form"')
+	expect(html).toMatch(/type="checkbox"[^>]*checked/)
+	expect(html).toContain('name="selected_scopes" value="profile"')
+	expect(html).toContain(
+		'Email visibility does not grant permission to send email',
+	)
 	expect(html).toContain('data-testid="package-app-oauth-approve"')
 	expect(html).toContain('>Allow<')
 	expect(html).toContain('>Cancel<')
@@ -60,4 +77,19 @@ test('package-app OAuth consent renders Kody shell fields', async () => {
 	const details = html.slice(detailsIndex)
 	expect(details.slice(0, details.indexOf('>'))).not.toContain(' open')
 	expect(html.slice(0, detailsIndex)).not.toContain('acme/demo')
+})
+
+test('package-app OAuth consent hides an empty already allowed section', async () => {
+	const html = await renderStartPage(
+		createElement(PackageAppOauthConsentPage, {
+			data: {
+				...loaderData,
+				alreadyAllowedScopes: ['profile'],
+				alreadyAllowedLabels: [],
+			},
+		}),
+		href,
+	)
+
+	expect(html).not.toContain('Already allowed:')
 })
