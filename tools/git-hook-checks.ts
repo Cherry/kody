@@ -8,6 +8,7 @@ import {
 	symlinkSync,
 } from 'node:fs'
 import { dirname, join, resolve as resolvePath } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
 	envWithNodeHeapFloor,
 	isExecutedDirectly,
@@ -857,17 +858,16 @@ function defaultRunNpmScript(
 	cwd?: string,
 	paths: ReadonlyArray<string> = [],
 ): Promise<number> {
-	// Node refuses to spawn `npm.cmd` without a shell on Windows. Args are
-	// script names and repo paths, not user input.
-	const shell = process.platform === 'win32'
 	return new Promise((resolve) => {
+		// Repo paths go straight to node, never through a shell, so spaces and
+		// metacharacters in paths stay intact on Windows.
 		const child = script.startsWith('vitest related --project ')
 			? spawn(
-					resolveNpmCommand(),
+					process.execPath,
 					[
-						'exec',
-						'--',
-						'vitest',
+						fileURLToPath(
+							new URL('../node_modules/vitest/vitest.mjs', import.meta.url),
+						),
 						'related',
 						'--run',
 						'--project',
@@ -879,7 +879,6 @@ function defaultRunNpmScript(
 						stdio: 'inherit',
 						env: { ...gitHookScriptEnv(), CI: '1' },
 						cwd,
-						shell,
 					},
 				)
 			: script.startsWith('node ')
@@ -892,7 +891,9 @@ function defaultRunNpmScript(
 						stdio: 'inherit',
 						env: gitHookScriptEnv(),
 						cwd,
-						shell,
+						// Node refuses to spawn `npm.cmd` without a shell on Windows; the
+						// only arg is a fixed script name.
+						shell: process.platform === 'win32',
 					})
 		child.once('error', (error) => {
 			console.error(error.message)
