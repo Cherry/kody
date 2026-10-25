@@ -28,6 +28,10 @@ import { type PackageCredentialApprovalLoaderData } from '#universal/package-cre
 import { type PackageCollaboratorsLoaderData } from '#universal/package-collaborators.ts'
 import { type PackageCredentialsLoaderData } from '#universal/package-credentials-page.ts'
 import { type HighlightedCode } from '#universal/highlighted-code.ts'
+import {
+	type EmailClassification,
+	type EmailMessageView,
+} from '#universal/email-message-view.ts'
 import { type PackageFilesContentKind } from '#universal/package-file-media.ts'
 import {
 	type PackageAppCustomDomainRecordView,
@@ -1112,6 +1116,9 @@ type AdminSystemEmailListItem = {
 	received_at: string | null
 	created_at: string
 	to_addresses: Array<string>
+	classification: EmailClassification
+	classification_reason: string | null
+	archived_at: string | null
 }
 
 type AdminSystemEmailDetail = AdminSystemEmailListItem & {
@@ -1149,6 +1156,7 @@ export type AdminSystemEmailLoaderData = {
 	page: number
 	pageSize: number
 	total: number
+	view: EmailMessageView
 }
 
 export type AdminPlatformFeedbackListItem = {
@@ -2806,8 +2814,9 @@ export type AccountEmailMessageListItem = {
 	subject: string | null
 	message_id_header: string | null
 	processing_status: string
-	classification: 'accepted' | 'quarantined'
+	classification: EmailClassification
 	classification_reason: string | null
+	archived_at: string | null
 	sender_classification: AccountEmailSenderClassification | null
 	sender_classification_reason: string | null
 	provider_message_id: string | null
@@ -2878,8 +2887,7 @@ export type AccountEmailLoaderData = {
 	pageSize: number
 	total: number
 	query: string
-	/** `null` means no classification filter (all messages). */
-	classification: 'accepted' | 'quarantined' | null
+	view: EmailMessageView
 }
 
 export type AuthProvidersLoaderData = {
